@@ -1,0 +1,8 @@
+{"type":"Feature","geometry":{"type":"Point","coordinates":[8.8,53.0]},"properties":{"@type":"node","@id":1,"amenity":"restaurant","name":"Zur Post","website":"https://zur-post.example","wikidata":"Q42","opening_hours":"Mo-Su 11:00-22:00","addr:street":"Marktplatz","addr:housenumber":"1","addr:postcode":"28195","addr:city":"Bremen","cuisine":"german"}}
+{"type":"Feature","geometry":{"type":"Point","coordinates":[8.8001,53.0001]},"properties":{"@type":"node","@id":2,"amenity":"restaurant"}}
+{"type":"Feature","geometry":{"type":"MultiPolygon","coordinates":[[[[8.8,53.0],[8.802,53.0],[8.802,53.002],[8.8,53.002],[8.8,53.0]]]]},"properties":{"@type":"way","@id":3,"amenity":"parking","access":"private"}}
+{"type":"Feature","geometry":{"type":"MultiPolygon","coordinates":[[[[8.8,53.0],[8.802,53.0],[8.802,53.002],[8.8,53.002],[8.8,53.0]]]]},"properties":{"@type":"way","@id":4,"leisure":"park"}}
+{"type":"Feature","geometry":{"type":"Point","coordinates":[8.81,53.01]},"properties":{"@type":"node","@id":5,"created_by":"JOSM"}}
+{"type":"Feature","geometry":{"type":"Point","coordinates":[8.81,53.01]},"properties":{"@type":"node","@id":6,"highway":"bus_stop","name":"Markt","website":"javascript:alert(1)","wikidata":"not-an-id"}}
+{"type":"Feature","geometry":{"type":"Point","coordinates":[8.82,53.02]},"properties":{"@type":"node","@id":7,"shop":"bakery","amenity":"cafe","name":"Café Krume"}}
+{"type":"Feature","geometry":{"type":"MultiPolygon","coordinates":[[[[0,0],[4,0],[4,4],[0,4],[0,0]],[[0,0],[0,2],[2,2],[2,0],[0,0]]]]},"properties":{"@type":"relation","@id":8,"natural":"beach","name":"Sandstrand"}}
