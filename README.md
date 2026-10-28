@@ -1,5 +1,9 @@
 # OpenPropertyLocation
 
+[![CI](https://github.com/ls-itsolutions/open-property-location/actions/workflows/ci.yml/badge.svg)](https://github.com/ls-itsolutions/open-property-location/actions/workflows/ci.yml)
+[![Data](https://github.com/ls-itsolutions/open-property-location/actions/workflows/data.yml/badge.svg)](https://github.com/ls-itsolutions/open-property-location/actions/workflows/data.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 A small, self-hostable HTTP service: **coordinates or an address in,
 structured surroundings out.**
 
@@ -58,6 +62,9 @@ pick a preset and see the results next to the raw API response. The page
 is off by default and has no dependencies besides the API itself.
 
 ## API
+
+The full reference is in [`openapi.yaml`](openapi.yaml) (OpenAPI 3.1), so
+you can generate a client for any language.
 
 ### `GET /v1/surroundings`
 
@@ -272,6 +279,20 @@ Address input is forwarded to Photon. The public instance at
 requests, but if you geocode a lot, run your own Photon instance and set
 `PHOTON_URL`. Coordinates input never calls the geocoder.
 
+## Compared to other options
+
+- **Overpass API:** raw OpenStreetMap queries. The public instances are
+  rate-limited and not meant for production use, and you get raw elements
+  without categories, ranking or walking times.
+- **Hosted places APIs** (Google Places, Geoapify and others): more data,
+  some with ratings, but paid beyond a free tier, often with terms on
+  caching and displaying results, and your coordinates leave your network.
+- **openpoiservice:** self-hosted points of interest from OpenStreetMap,
+  but it needs PostGIS and has no presets, ranking or address input.
+- **Walk Score and similar scores:** one proprietary number per location.
+  OpenPropertyLocation returns the places themselves, so you decide how to
+  present them.
+
 ## Licensing and attribution
 
 - The code is licensed under the [MIT License](LICENSE).
@@ -296,3 +317,8 @@ it. The data workflow builds Germany, Austria and Switzerland weekly, checks
 each (Berlin Alexanderplatz, Wien Hauptbahnhof and Zürich HB must have a
 train station with lines within 500 m, plus size and per-category counts)
 and only then publishes the image and the `data-<country>` release asset.
+If it fails, it opens an issue and closes it once a build passes again.
+
+Dependabot updates are merged automatically when all checks pass, except
+major versions. Once a month the release workflow drafts the next release
+if the binary changed; publishing the draft tags it and CI pushes the image.

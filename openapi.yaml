@@ -1,0 +1,266 @@
+openapi: 3.1.0
+info:
+  title: OpenPropertyLocation
+  summary: Structured surroundings of a location from OpenStreetMap data.
+  description: |
+    Self-hosted service that returns the nearest supermarkets, bakeries,
+    bus stops, train stations, schools, beaches and more for a location,
+    grouped by category, with distance, an estimated walking time and the
+    public transport lines serving each stop.
+
+    The data comes from OpenStreetMap (ODbL). Clients must display the
+    `attribution` returned in every response.
+  license:
+    name: MIT
+    identifier: MIT
+  version: "1"
+externalDocs:
+  url: https://github.com/ls-itsolutions/open-property-location
+servers:
+  - url: http://localhost:8080
+paths:
+  /v1/surroundings:
+    get:
+      operationId: getSurroundings
+      summary: Nearest places around a location, grouped by category
+      description: |
+        Give exactly one of `lat`/`lon` or `address`, and exactly one of
+        `preset` or `categories`. Within a category, places are sorted by
+        `distanceMeters / (1 + importance)`, where importance (0 to 1) rises
+        with a Wikidata or Wikipedia link, a website, opening hours and
+        tourist or historic tags.
+      parameters:
+        - name: lat
+          in: query
+          description: WGS84 latitude. Requires `lon`.
+          schema: { type: number, minimum: -90, maximum: 90 }
+          example: 54.1776
+        - name: lon
+          in: query
+          description: WGS84 longitude. Requires `lat`.
+          schema: { type: number, minimum: -180, maximum: 180 }
+          example: 12.0838
+        - name: address
+          in: query
+          description: Free-text address, geocoded with Photon.
+          schema: { type: string, maxLength: 200 }
+          example: Alexanderplatz, Berlin
+        - name: preset
+          in: query
+          description: >
+            `stay` for vacation rentals, `living` for long-term rentals and
+            sales. The preset defines the categories and their order.
+          schema: { $ref: "#/components/schemas/Preset" }
+        - name: categories
+          in: query
+          description: Comma-separated category ids, returned in this order.
+          schema: { type: string }
+          example: supermarket,school
+        - name: limit
+          in: query
+          description: Places per category.
+          schema: { type: integer, minimum: 1, maximum: 20, default: 5 }
+      responses:
+        "200":
+          description: One entry per requested category, also when it has no places.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SurroundingsResponse" }
+        "400":
+          $ref: "#/components/responses/Error"
+        "404":
+          description: The address was not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "502":
+          description: The geocoder failed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /v1/categories:
+    get:
+      operationId: getCategories
+      summary: All categories with their search radius, and the presets
+      responses:
+        "200":
+          description: Categories and presets.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CategoriesResponse" }
+  /health:
+    get:
+      operationId: getHealth
+      summary: Whether the database is readable
+      responses:
+        "200":
+          description: Healthy.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { const: ok }
+        "503":
+          description: The database is not readable.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+components:
+  responses:
+    Error:
+      description: Invalid parameters.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+  schemas:
+    Preset:
+      type: string
+      enum: [stay, living]
+    CategoryId:
+      type: string
+      description: Stable category id. Clients translate it into their own labels.
+      enum:
+        - restaurant
+        - cafe
+        - bar
+        - ice_cream
+        - bakery
+        - supermarket
+        - pharmacy
+        - post_office
+        - atm
+        - hospital
+        - paediatrician
+        - doctor
+        - kindergarten
+        - school
+        - bus_tram_stop
+        - train_station
+        - ferry_terminal
+        - attraction
+        - beach
+        - swimming
+        - park
+        - playground
+        - fitness
+        - parking
+        - ev_charging
+        - bicycle_rental
+    SurroundingsResponse:
+      type: object
+      required: [location, categories, dataVersion, attribution]
+      properties:
+        location:
+          description: The requested or geocoded location.
+          $ref: "#/components/schemas/Location"
+        categories:
+          type: array
+          items: { $ref: "#/components/schemas/CategoryResult" }
+        dataVersion:
+          type: string
+          format: date
+          description: Date of the OpenStreetMap extract.
+        attribution:
+          type: string
+          description: Must be displayed wherever the data is shown.
+          example: © OpenStreetMap contributors, ODbL
+    Location:
+      type: object
+      required: [lat, lon]
+      properties:
+        lat: { type: number }
+        lon: { type: number }
+    CategoryResult:
+      type: object
+      required: [id, places]
+      properties:
+        id: { $ref: "#/components/schemas/CategoryId" }
+        places:
+          type: array
+          items: { $ref: "#/components/schemas/Place" }
+    Place:
+      type: object
+      required: [id, name, lat, lon, distanceMeters, walkingMinutes, address,
+        openingHours, website, wikidata, lines, osmUrl]
+      properties:
+        id:
+          type: string
+          description: OSM element, `node/<id>`, `way/<id>` or `relation/<id>`.
+          example: node/123456
+        name: { type: [string, "null"] }
+        lat: { type: number }
+        lon: { type: number }
+        distanceMeters:
+          type: integer
+          description: >
+            Straight-line distance. For beaches, swimming spots and parks it
+            is measured to the nearest edge of the area and is 0 inside it;
+            for other areas to the centroid.
+        walkingMinutes:
+          type: integer
+          description: >
+            Estimate, not a route: ceil(distanceMeters × 1.3 / 80), with 1.3
+            for detours and 80 m/min (about 4.8 km/h).
+        address: { $ref: "#/components/schemas/Address" }
+        openingHours:
+          type: [string, "null"]
+          description: Raw OSM opening_hours value.
+          example: Mo-Sa 06:00-18:00
+        website:
+          type: [string, "null"]
+          format: uri
+          description: Always an http or https URL.
+        wikidata:
+          type: [string, "null"]
+          example: Q64
+        lines:
+          type: [array, "null"]
+          description: >
+            Public transport lines serving a stop, station or ferry terminal,
+            sorted by mode and then by ref.
+          items: { $ref: "#/components/schemas/Line" }
+        osmUrl:
+          type: string
+          format: uri
+          example: https://www.openstreetmap.org/node/123456
+    Address:
+      type: object
+      required: [street, houseNumber, postcode, city]
+      properties:
+        street: { type: [string, "null"] }
+        houseNumber: { type: [string, "null"] }
+        postcode: { type: [string, "null"] }
+        city: { type: [string, "null"] }
+    Line:
+      type: object
+      required: [mode, ref]
+      properties:
+        mode:
+          type: string
+          enum: [train, light_rail, subway, tram, trolleybus, bus, ferry]
+        ref: { type: string, example: S1 }
+    CategoriesResponse:
+      type: object
+      required: [categories, presets]
+      properties:
+        categories:
+          type: array
+          items:
+            type: object
+            required: [id, maxDistanceMeters]
+            properties:
+              id: { $ref: "#/components/schemas/CategoryId" }
+              maxDistanceMeters: { type: integer }
+        presets:
+          type: object
+          description: Preset name to category ids, in response order.
+          additionalProperties:
+            type: array
+            items: { $ref: "#/components/schemas/CategoryId" }
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }

@@ -451,8 +451,11 @@ internal/demo/             # opt-in demo page (serve --demo)
 scripts/build-data.sh
 docs/                      # README screenshots of the demo page
 Dockerfile
-.github/workflows/ci.yml
-.github/workflows/data.yml
+openapi.yaml               # API reference; TestOpenAPI keeps it in sync
+.github/workflows/ci.yml   # also merges Dependabot patch/minor updates
+.github/workflows/data.yml # opens an issue while the weekly build fails
+.github/workflows/release.yml # monthly draft release + reminder issue
+.github/dependabot.yml
 LICENSE                    # MIT (code)
 LICENSE-DATA               # ODbL notice for data in images and releases
 README.md
