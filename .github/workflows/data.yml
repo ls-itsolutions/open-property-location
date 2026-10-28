@@ -59,4 +59,4 @@ jobs:
             gh release create data-germany --title "Data: Germany" --notes "$notes" --latest=false
           fi
           gh release upload data-germany out/places.db LICENSE-DATA --clobber
-          gh release edit data-germany --notes "$notes"
+          gh release edit data-germany --notes "$notes" --latest=false
