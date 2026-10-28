@@ -1,0 +1,7 @@
+/opl
+/out/
+*.db
+*.db.tmp
+*.osm.pbf
+*.geojsonseq
+!internal/*/testdata/*.geojsonseq

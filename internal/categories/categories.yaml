@@ -1,0 +1,172 @@
+# Category definitions for OpenPropertyLocation.
+#
+# The category ids are part of the public API. Rename or remove one only
+# together with a major version bump.
+#
+# Fields:
+#   id                 stable snake_case id returned by the API
+#   match              OSM tag matchers, "key=value" or "key=value1,value2";
+#                      an element belongs to the category if any matcher fits
+#   requireName        drop elements without a name tag
+#   maxDistanceMeters  search radius around the requested location
+#   collapseSameName   optional; return only the best ranked of several
+#                      places with the same name (OSM often maps one stop
+#                      per direction or line)
+#
+# An element that matches several categories belongs to the first one in
+# this file. The osmium filter for the data build is generated from these
+# matchers (`opl filter-expressions`), so after changing them the data has
+# to be rebuilt.
+
+categories:
+  # Food and drink
+  - id: restaurant
+    match:
+      - amenity=restaurant
+    requireName: true
+    maxDistanceMeters: 2000
+
+  - id: cafe
+    match:
+      - amenity=cafe
+    requireName: true
+    maxDistanceMeters: 2000
+
+  - id: bar
+    match:
+      - amenity=bar,pub,biergarten
+    requireName: true
+    maxDistanceMeters: 2000
+
+  # Shopping and everyday needs
+  - id: bakery
+    match:
+      - shop=bakery
+    requireName: true
+    maxDistanceMeters: 2000
+
+  - id: supermarket
+    match:
+      - shop=supermarket
+    requireName: true
+    maxDistanceMeters: 3000
+
+  - id: pharmacy
+    match:
+      - amenity=pharmacy
+    requireName: true
+    maxDistanceMeters: 3000
+
+  # Health
+  - id: doctor
+    match:
+      - amenity=doctors,clinic
+    requireName: true
+    maxDistanceMeters: 3000
+
+  - id: hospital
+    match:
+      - amenity=hospital
+    requireName: true
+    maxDistanceMeters: 15000
+
+  # Children and education
+  - id: kindergarten
+    match:
+      - amenity=kindergarten,childcare
+    requireName: true
+    maxDistanceMeters: 3000
+
+  - id: school
+    match:
+      - amenity=school
+    requireName: true
+    maxDistanceMeters: 5000
+
+  # Public transport
+  - id: bus_tram_stop
+    match:
+      - highway=bus_stop
+      - railway=tram_stop
+    requireName: true
+    maxDistanceMeters: 1000
+    collapseSameName: true
+
+  - id: train_station
+    match:
+      - railway=station,halt
+    requireName: true
+    maxDistanceMeters: 10000
+    collapseSameName: true
+
+  # Leisure and sights
+  - id: attraction
+    match:
+      - tourism=attraction,museum,viewpoint
+      - historic=castle,monument
+    requireName: true
+    maxDistanceMeters: 10000
+
+  - id: beach
+    match:
+      - natural=beach
+    requireName: false
+    maxDistanceMeters: 15000
+
+  - id: park
+    match:
+      - leisure=park
+    requireName: false
+    maxDistanceMeters: 2000
+
+  - id: playground
+    match:
+      - leisure=playground
+    requireName: false
+    maxDistanceMeters: 1000
+
+  # Mobility
+  - id: parking
+    match:
+      - amenity=parking
+    requireName: false
+    maxDistanceMeters: 1000
+
+  - id: ev_charging
+    match:
+      - amenity=charging_station
+    requireName: false
+    maxDistanceMeters: 3000
+
+# Presets select categories for a use case. The order of the list is the
+# order of the groups in the response.
+presets:
+  # Vacation rentals: "around the stay"
+  stay:
+    - restaurant
+    - cafe
+    - bar
+    - bakery
+    - supermarket
+    - pharmacy
+    - bus_tram_stop
+    - train_station
+    - attraction
+    - beach
+    - park
+    - parking
+    - ev_charging
+
+  # Long-term rentals and properties for sale
+  living:
+    - supermarket
+    - bakery
+    - pharmacy
+    - doctor
+    - hospital
+    - kindergarten
+    - school
+    - bus_tram_stop
+    - train_station
+    - park
+    - playground
