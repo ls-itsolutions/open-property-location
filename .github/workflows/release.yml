@@ -1,0 +1,55 @@
+name: Release draft
+
+# Drafts the next release when the binary changed since the last one and
+# opens an issue as a reminder. Publishing the draft creates the tag, and the
+# CI workflow builds and pushes the image.
+
+on:
+  schedule:
+    - cron: "0 6 1 * *" # first day of the month, 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  draft:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          last=$(git describe --tags --abbrev=0 --match 'v*')
+          paths=(cmd internal go.mod go.sum Dockerfile ':(exclude)*_test.go')
+          changes=$(git log --no-merges --format='%s' "$last..HEAD" -- "${paths[@]}")
+          if [[ -z $changes ]]; then
+            echo "nothing to release since $last"
+            exit 0
+          fi
+
+          # Dependency updates only: patch release. Anything else: minor.
+          IFS=. read -r major minor patch <<< "${last#v}"
+          if grep -qv '^Bump ' <<< "$changes"; then
+            next="v$major.$((minor + 1)).0"
+          else
+            next="v$major.$minor.$((patch + 1))"
+          fi
+
+          gh release list --json tagName,isDraft --jq '.[] | select(.isDraft) | .tagName' |
+            while read -r tag; do gh release delete "$tag" --yes; done
+          notes=$(sed 's/^/- /' <<< "$changes")
+          notes+=$'\n\n'"Image: \`ghcr.io/$GITHUB_REPOSITORY:${next#v}\`"
+          url=$(gh release create "$next" --draft --target "$GITHUB_SHA" --title "$next" --notes "$notes")
+
+          gh label create release --color 0e8a16 --description "Release ready to publish" --force
+          gh issue list --label release --state open --json number --jq '.[].number' |
+            while read -r n; do gh issue close "$n" --comment "Superseded by $next."; done
+          gh issue create --label release --title "Publish $next" \
+            --body "A draft release is ready: $url. Review the notes (and the version) and publish it; CI then builds the image."

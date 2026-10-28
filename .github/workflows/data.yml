@@ -95,3 +95,30 @@ jobs:
           fi
           gh release upload "$release" out/places.db LICENSE-DATA --clobber
           gh release edit "$release" --notes "$notes" --latest=false
+
+  # Keeps one open issue while the weekly build fails, and closes it once a
+  # build passes again.
+  report:
+    needs: build
+    if: always() && needs.build.result != 'cancelled'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      RESULT: ${{ needs.build.result }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Open or close issue
+        run: |
+          open=$(gh issue list --label data-build --state open --json number --jq '.[0].number // empty')
+          if [[ $RESULT == success ]]; then
+            if [[ -n $open ]]; then gh issue close "$open" --comment "Passing again: $RUN_URL"; fi
+          elif [[ -n $open ]]; then
+            gh issue comment "$open" --body "Still failing: $RUN_URL"
+          else
+            gh label create data-build --color d93f0b --description "Weekly data build" --force
+            gh issue create --label data-build --title "Weekly data build failed" \
+              --body "The data workflow failed, so the images and data releases were not updated: $RUN_URL"
+          fi
