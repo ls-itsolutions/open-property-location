@@ -44,9 +44,9 @@ jobs:
       - name: Smoke test
         run: |
           go build -o opl ./cmd/opl
-          scripts/smoke-test.sh ./opl out/places.db 53.0833 8.8136 train_station 500
+          REQUIRE_LINES=1 scripts/smoke-test.sh ./opl out/places.db 53.0833 8.8136 train_station 500
       - name: Build data image
-        run: docker build --target germany --build-context data=out -t opl:test .
+        run: docker build --target with-data --build-context data=out -t opl:test .
 
   publish:
     if: startsWith(github.ref, 'refs/tags/v')

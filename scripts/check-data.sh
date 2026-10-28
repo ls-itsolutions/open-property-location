@@ -4,7 +4,8 @@
 #
 #   scripts/check-data.sh <places.db>
 #
-# Thresholds (defaults fit Germany): MIN_SIZE_MB, MAX_SIZE_MB, MIN_PER_CATEGORY.
+# Thresholds (defaults fit Germany; empty values use them too): MIN_SIZE_MB,
+# MAX_SIZE_MB, MIN_PER_CATEGORY.
 # Requires sqlite3.
 set -euo pipefail
 

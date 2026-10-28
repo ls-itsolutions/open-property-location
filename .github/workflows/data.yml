@@ -6,8 +6,8 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write # rolling release data-germany
-  packages: write # germany image
+  contents: write # rolling releases data-<region>
+  packages: write # <region> images
 
 concurrency:
   group: data
@@ -17,9 +17,35 @@ env:
   IMAGE: ghcr.io/ls-itsolutions/open-property-location
 
 jobs:
-  germany:
+  build:
+    name: ${{ matrix.name }}
     runs-on: ubuntu-latest
     timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The smoke test location must have a train station with lines
+          # within 500 m.
+          - name: germany
+            title: Germany
+            geofabrik: europe/germany
+            smoke: 52.5219 13.4132 # Berlin Alexanderplatz
+          - name: austria
+            title: Austria
+            geofabrik: europe/austria
+            smoke: 48.1851 16.3777 # Wien Hauptbahnhof
+            min_size_mb: 10
+            min_per_category: 50
+          - name: switzerland
+            title: Switzerland
+            geofabrik: europe/switzerland
+            smoke: 47.3779 8.5403 # Zürich HB
+            min_size_mb: 10
+            min_per_category: 50
+    env:
+      REGION: ${{ matrix.name }}
+      TITLE: ${{ matrix.title }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -30,33 +56,42 @@ jobs:
       - name: Install tools
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends osmium-tool sqlite3
       - name: Build data
+        env:
+          GEOFABRIK: ${{ matrix.geofabrik }}
         run: |
-          scripts/build-data.sh europe/germany out
+          scripts/build-data.sh "$GEOFABRIK" out
           echo "DATA_VERSION=$(cat out/data-version)" >> "$GITHUB_ENV"
           df -h .
-      - name: Smoke test (Berlin Alexanderplatz)
+      - name: Smoke test
+        env:
+          SMOKE: ${{ matrix.smoke }}
         run: |
           go build -o opl ./cmd/opl
-          scripts/smoke-test.sh ./opl out/places.db 52.5219 13.4132 train_station 500
+          read -r lat lon <<< "$SMOKE"
+          REQUIRE_LINES=1 scripts/smoke-test.sh ./opl out/places.db "$lat" "$lon" train_station 500
       - name: Check size and counts
+        env:
+          MIN_SIZE_MB: ${{ matrix.min_size_mb }}
+          MIN_PER_CATEGORY: ${{ matrix.min_per_category }}
         run: scripts/check-data.sh out/places.db
       - name: Log in to GHCR
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: echo "$TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-      - name: Build and push germany image
+      - name: Build and push image
         run: |
           docker buildx create --use
-          docker buildx build --platform linux/amd64,linux/arm64 --target germany \
+          docker buildx build --platform linux/amd64,linux/arm64 --target with-data \
             --build-context data=out --push \
-            -t "$IMAGE:germany" -t "$IMAGE:germany-$DATA_VERSION" .
+            -t "$IMAGE:$REGION" -t "$IMAGE:$REGION-$DATA_VERSION" .
       - name: Upload release asset
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          notes="OpenStreetMap data for Germany as of $DATA_VERSION. © OpenStreetMap contributors, ODbL 1.0 (see LICENSE-DATA)."
-          if ! gh release view data-germany > /dev/null 2>&1; then
-            gh release create data-germany --title "Data: Germany" --notes "$notes" --latest=false
+          release="data-$REGION"
+          notes="OpenStreetMap data for $TITLE as of $DATA_VERSION. © OpenStreetMap contributors, ODbL 1.0 (see LICENSE-DATA)."
+          if ! gh release view "$release" > /dev/null 2>&1; then
+            gh release create "$release" --title "Data: $TITLE" --notes "$notes" --latest=false
           fi
-          gh release upload data-germany out/places.db LICENSE-DATA --clobber
-          gh release edit data-germany --notes "$notes" --latest=false
+          gh release upload "$release" out/places.db LICENSE-DATA --clobber
+          gh release edit "$release" --notes "$notes" --latest=false

@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Starts opl on a database and checks that the nearest place of a category is
-# within the given distance.
+# within the given distance. With REQUIRE_LINES=1 it must also have public
+# transport lines.
 #
 #   scripts/smoke-test.sh <opl-binary> <places.db> <lat> <lon> <category> <max-meters>
-#   scripts/smoke-test.sh ./opl out/places.db 52.5219 13.4132 train_station 500
+#   REQUIRE_LINES=1 scripts/smoke-test.sh ./opl out/places.db 52.5219 13.4132 train_station 500
 #
 # Requires curl and jq.
 set -euo pipefail
@@ -29,6 +30,10 @@ echo "$resp" | jq .
 if ! echo "$resp" | jq -e --argjson max "$max" \
   '.categories[0].places | length > 0 and .[0].distanceMeters <= $max' > /dev/null; then
   echo "smoke test failed: no $category within $max m of $lat,$lon" >&2
+  exit 1
+fi
+if [[ ${REQUIRE_LINES:-} == 1 ]] && ! echo "$resp" | jq -e '.categories[0].places[0].lines | length > 0' > /dev/null; then
+  echo "smoke test failed: the nearest $category has no lines" >&2
   exit 1
 fi
 echo "smoke test passed"

@@ -3,7 +3,7 @@
 # Binary only:
 #   docker build --target app -t opl .
 # Binary with data (expects places.db in out/):
-#   docker build --target germany --build-context data=out -t opl:germany .
+#   docker build --target with-data --build-context data=out -t opl:germany .
 
 FROM --platform=$BUILDPLATFORM golang:1.27 AS build
 ARG TARGETOS TARGETARCH
@@ -26,7 +26,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=5s CMD ["/opl", "healthch
 ENTRYPOINT ["/opl"]
 CMD ["serve"]
 
-FROM app AS germany
+FROM app AS with-data
 LABEL org.opencontainers.image.licenses="MIT AND ODbL-1.0"
 COPY LICENSE-DATA /LICENSE-DATA
 COPY --from=data places.db /data/places.db
