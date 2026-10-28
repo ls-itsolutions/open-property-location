@@ -5,21 +5,39 @@ const labels = {
   restaurant: "Restaurants",
   cafe: "Cafés",
   bar: "Bars and pubs",
+  ice_cream: "Ice cream",
   bakery: "Bakeries",
   supermarket: "Supermarkets",
   pharmacy: "Pharmacies",
-  doctor: "Doctors",
+  post_office: "Post offices",
+  atm: "Cash machines",
   hospital: "Hospitals",
+  paediatrician: "Paediatricians",
+  doctor: "Doctors",
   kindergarten: "Kindergartens",
   school: "Schools",
   bus_tram_stop: "Bus and tram stops",
   train_station: "Train stations",
+  ferry_terminal: "Ferries",
   attraction: "Sights",
   beach: "Beaches",
+  swimming: "Swimming",
   park: "Parks",
   playground: "Playgrounds",
+  fitness: "Gyms",
   parking: "Parking",
   ev_charging: "EV charging",
+  bicycle_rental: "Bike rental",
+};
+
+const modes = {
+  train: "Train",
+  light_rail: "Light rail",
+  subway: "Subway",
+  tram: "Tram",
+  trolleybus: "Trolleybus",
+  bus: "Bus",
+  ferry: "Ferry",
 };
 
 const coordinates = /^\s*(-?\d+(?:\.\d+)?)\s*[,;\s]\s*(-?\d+(?:\.\d+)?)\s*$/;
@@ -43,6 +61,16 @@ function setStatus(text, isError = false) {
   statusLine.classList.toggle("error", isError);
 }
 
+// "Bus 4, 23 · Tram 6". The API returns lines sorted by mode.
+function formatLines(lines) {
+  const byMode = new Map();
+  for (const { mode, ref } of lines) {
+    if (!byMode.has(mode)) byMode.set(mode, []);
+    byMode.get(mode).push(ref);
+  }
+  return [...byMode].map(([mode, refs]) => `${modes[mode] ?? mode} ${refs.join(", ")}`).join(" · ");
+}
+
 function link(href, text) {
   const a = document.createElement("a");
   a.href = href;
@@ -64,8 +92,12 @@ function renderPlace(place) {
   const a = place.address;
   const street = [a.street, a.houseNumber].filter(Boolean).join(" ");
   const city = [a.postcode, a.city].filter(Boolean).join(" ");
-  const lines = [[street, city].filter(Boolean).join(", "), place.openingHours];
-  for (const text of lines.filter(Boolean)) {
+  const rows = [
+    place.lines && formatLines(place.lines),
+    [street, city].filter(Boolean).join(", "),
+    place.openingHours,
+  ];
+  for (const text of rows.filter(Boolean)) {
     const div = document.createElement("div");
     div.textContent = text;
     details.append(div);
@@ -147,9 +179,12 @@ async function init() {
   for (const c of categories) radii.set(c.id, c.maxDistanceMeters);
   for (const name of Object.keys(presets)) form.preset.add(new Option(name, name));
 
+  // Values from the URL that are not in a dropdown would leave it empty.
   const params = new URLSearchParams(location.search);
-  if (params.has("preset")) form.preset.value = params.get("preset");
-  if (params.has("limit")) form.limit.value = params.get("limit");
+  for (const name of ["preset", "limit"]) {
+    const select = form[name];
+    if ([...select.options].some((o) => o.value === params.get(name))) select.value = params.get(name);
+  }
   if (params.has("q")) {
     form.q.value = params.get("q");
     search();
