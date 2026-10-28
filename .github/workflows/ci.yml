@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/ls-itsolutions/open-property-location
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+      - run: go vet ./...
+      - run: go test ./...
+      - run: CGO_ENABLED=0 go build -o opl ./cmd/opl
+
+  pipeline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Install osmium-tool
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends osmium-tool
+      - name: Build Bremen data
+        run: scripts/build-data.sh europe/germany/bremen out
+      - name: Smoke test
+        run: |
+          go build -o opl ./cmd/opl
+          scripts/smoke-test.sh ./opl out/places.db 53.0833 8.8136 train_station 500
+      - name: Build data image
+        run: docker build --target germany --build-context data=out -t opl:test .
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [test, pipeline]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Log in to GHCR
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+      - name: Build and push binary image
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          if [[ ! $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "tag $GITHUB_REF_NAME is not vMAJOR.MINOR.PATCH" >&2
+            exit 1
+          fi
+          docker buildx create --use
+          docker buildx build --platform linux/amd64,linux/arm64 --target app \
+            --push -t "$IMAGE:$version" .

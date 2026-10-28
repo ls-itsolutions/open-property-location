@@ -1,0 +1,62 @@
+name: Data
+
+on:
+  schedule:
+    - cron: "0 4 * * 1" # Mondays, 04:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write # rolling release data-germany
+  packages: write # germany image
+
+concurrency:
+  group: data
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/ls-itsolutions/open-property-location
+
+jobs:
+  germany:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Install tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends osmium-tool sqlite3
+      - name: Build data
+        run: |
+          scripts/build-data.sh europe/germany out
+          echo "DATA_VERSION=$(cat out/data-version)" >> "$GITHUB_ENV"
+          df -h .
+      - name: Smoke test (Berlin Alexanderplatz)
+        run: |
+          go build -o opl ./cmd/opl
+          scripts/smoke-test.sh ./opl out/places.db 52.5219 13.4132 train_station 500
+      - name: Check size and counts
+        run: scripts/check-data.sh out/places.db
+      - name: Log in to GHCR
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+      - name: Build and push germany image
+        run: |
+          docker buildx create --use
+          docker buildx build --platform linux/amd64,linux/arm64 --target germany \
+            --build-context data=out --push \
+            -t "$IMAGE:germany" -t "$IMAGE:germany-$DATA_VERSION" .
+      - name: Upload release asset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          notes="OpenStreetMap data for Germany as of $DATA_VERSION. © OpenStreetMap contributors, ODbL 1.0 (see LICENSE-DATA)."
+          if ! gh release view data-germany > /dev/null 2>&1; then
+            gh release create data-germany --title "Data: Germany" --notes "$notes" --latest=false
+          fi
+          gh release upload data-germany out/places.db LICENSE-DATA --clobber
+          gh release edit data-germany --notes "$notes"

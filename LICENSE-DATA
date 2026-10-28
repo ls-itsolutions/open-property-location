@@ -1,0 +1,19 @@
+Data license
+
+The database places.db shipped in the open-property-location data images and
+GitHub releases is derived from OpenStreetMap data and is made available under
+the Open Database License (ODbL) 1.0:
+https://opendatacommons.org/licenses/odbl/1-0/
+
+Any rights in individual contents of the database are licensed under the
+Database Contents License (DbCL) 1.0:
+https://opendatacommons.org/licenses/dbcl/1-0/
+
+© OpenStreetMap contributors
+https://www.openstreetmap.org/copyright
+
+If you display data from this database, you must attribute it, for example
+with "© OpenStreetMap contributors, ODbL" and a link to
+https://www.openstreetmap.org/copyright.
+
+The program code is licensed separately under the MIT License (see LICENSE).
