@@ -1,6 +1,10 @@
 package server
 
-import "math"
+import (
+	"math"
+
+	"github.com/ls-itsolutions/open-property-location/internal/outline"
+)
 
 const (
 	earthRadiusMeters = 6371008.8
@@ -44,4 +48,39 @@ func boundingBox(lat, lon, radiusMeters float64) (minLat, maxLat, minLon, maxLon
 	}
 	dLon := degrees(math.Asin(math.Sin(d) / math.Cos(radians(lat))))
 	return minLat, maxLat, lon - dLon, lon + dLon
+}
+
+// distanceToArea returns the distance in meters from lat/lon to the nearest
+// edge of an area, or 0 inside it. The rings are projected onto a plane
+// around lat/lon, which is accurate enough within the search radii.
+func distanceToArea(rings []outline.Ring, lat, lon float64) float64 {
+	metersPerDegreeLat := radians(1) * earthRadiusMeters
+	metersPerDegreeLon := metersPerDegreeLat * math.Cos(radians(lat))
+	nearest := math.Inf(1)
+	inside := false
+	for _, ring := range rings {
+		for i := 0; i+1 < len(ring); i++ {
+			ax, ay := (ring[i][0]-lon)*metersPerDegreeLon, (ring[i][1]-lat)*metersPerDegreeLat
+			bx, by := (ring[i+1][0]-lon)*metersPerDegreeLon, (ring[i+1][1]-lat)*metersPerDegreeLat
+			nearest = math.Min(nearest, distanceToSegment(ax, ay, bx, by))
+			// Even-odd rule with a ray from the origin along the positive x axis.
+			if (ay > 0) != (by > 0) && ax-ay*(bx-ax)/(by-ay) > 0 {
+				inside = !inside
+			}
+		}
+	}
+	if inside {
+		return 0
+	}
+	return nearest
+}
+
+// distanceToSegment returns the distance from the origin to the segment a-b.
+func distanceToSegment(ax, ay, bx, by float64) float64 {
+	dx, dy := bx-ax, by-ay
+	var t float64
+	if length2 := dx*dx + dy*dy; length2 > 0 {
+		t = math.Max(0, math.Min(1, -(ax*dx+ay*dy)/length2))
+	}
+	return math.Hypot(ax+t*dx, ay+t*dy)
 }

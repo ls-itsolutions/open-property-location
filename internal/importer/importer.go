@@ -15,6 +15,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/ls-itsolutions/open-property-location/internal/categories"
+	"github.com/ls-itsolutions/open-property-location/internal/transit"
 )
 
 const schema = `
@@ -30,7 +31,9 @@ CREATE TABLE places (
   lat         REAL NOT NULL,
   lon         REAL NOT NULL,
   importance  REAL NOT NULL,
-  tags        TEXT NOT NULL
+  tags        TEXT NOT NULL,
+  lines       TEXT,
+  outline     BLOB
 );
 
 CREATE VIRTUAL TABLE places_rtree USING rtree(
@@ -52,10 +55,11 @@ type Meta struct {
 
 // Import reads GeoJSON features as written by
 // `osmium export -f geojsonseq -x print_record_separator=false -a type,id`
-// and creates a new database at outPath. The database is written to a
-// temporary file first and renamed at the end, so an existing file is only
-// replaced by a complete one. It returns the number of places per category.
-func Import(cfg *categories.Config, in io.Reader, outPath string, meta Meta) (map[string]int, error) {
+// and creates a new database at outPath. lines may be nil. The database is
+// written to a temporary file first and renamed at the end, so an existing
+// file is only replaced by a complete one. It returns the number of places
+// per category.
+func Import(cfg *categories.Config, in io.Reader, lines *transit.Lines, outPath string, meta Meta) (map[string]int, error) {
 	if meta.Region == "" {
 		return nil, errors.New("region is required")
 	}
@@ -67,7 +71,7 @@ func Import(cfg *categories.Config, in io.Reader, outPath string, meta Meta) (ma
 	if err := os.Remove(tmpPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, err
 	}
-	counts, err := write(cfg, in, tmpPath, meta)
+	counts, err := write(cfg, in, lines, tmpPath, meta)
 	if err == nil {
 		err = os.Rename(tmpPath, outPath)
 	}
@@ -78,7 +82,7 @@ func Import(cfg *categories.Config, in io.Reader, outPath string, meta Meta) (ma
 	return counts, nil
 }
 
-func write(cfg *categories.Config, in io.Reader, path string, meta Meta) (counts map[string]int, err error) {
+func write(cfg *categories.Config, in io.Reader, lines *transit.Lines, path string, meta Meta) (counts map[string]int, err error) {
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, err
@@ -112,8 +116,8 @@ func write(cfg *categories.Config, in io.Reader, path string, meta Meta) (counts
 	}
 
 	insertPlace, err := tx.Prepare(`INSERT INTO places
-		(osm_type, osm_id, category, name, lat, lon, importance, tags)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+		(osm_type, osm_id, category, name, lat, lon, importance, tags, lines, outline)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return nil, err
 	}
@@ -133,7 +137,7 @@ func write(cfg *categories.Config, in io.Reader, path string, meta Meta) (counts
 		} else if err != nil {
 			return nil, fmt.Errorf("feature %d: %w", n, err)
 		}
-		p, ok, err := toPlace(cfg, f)
+		p, ok, err := toPlace(cfg, lines, f)
 		if err != nil {
 			return nil, fmt.Errorf("feature %d: %w", n, err)
 		}
@@ -145,11 +149,22 @@ func write(cfg *categories.Config, in io.Reader, path string, meta Meta) (counts
 		if err != nil {
 			return nil, err
 		}
-		var name any
+		var name, placeLines, placeOutline any
 		if p.name != "" {
 			name = p.name
 		}
-		res, err := insertPlace.Exec(p.osmType, p.osmID, p.category, name, p.lat, p.lon, p.importance, string(tags))
+		if len(p.lines) > 0 {
+			b, err := json.Marshal(p.lines)
+			if err != nil {
+				return nil, err
+			}
+			placeLines = string(b)
+		}
+		if p.outline != nil {
+			placeOutline = p.outline
+		}
+		res, err := insertPlace.Exec(p.osmType, p.osmID, p.category, name, p.lat, p.lon,
+			p.importance, string(tags), placeLines, placeOutline)
 		if err != nil {
 			return nil, err
 		}
@@ -158,7 +173,7 @@ func write(cfg *categories.Config, in io.Reader, path string, meta Meta) (counts
 			return nil, err
 		}
 		key := categoryKeys[p.category]
-		if _, err := insertBox.Exec(id, p.lat, p.lat, p.lon, p.lon, key, key); err != nil {
+		if _, err := insertBox.Exec(id, p.minLat, p.maxLat, p.minLon, p.maxLon, key, key); err != nil {
 			return nil, err
 		}
 		counts[p.category]++

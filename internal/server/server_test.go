@@ -1,6 +1,7 @@
 package server
 
 import (
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -13,11 +14,21 @@ import (
 	"github.com/ls-itsolutions/open-property-location/internal/categories"
 	"github.com/ls-itsolutions/open-property-location/internal/geocode"
 	"github.com/ls-itsolutions/open-property-location/internal/importer"
+	"github.com/ls-itsolutions/open-property-location/internal/transit"
 )
 
 func newTestHandler(t *testing.T, photon http.HandlerFunc) http.Handler {
 	t.Helper()
 	cats, err := categories.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	routes, err := os.Open("testdata/routes.osm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer routes.Close()
+	lines, err := transit.ReadLines(routes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +38,7 @@ func newTestHandler(t *testing.T, photon http.HandlerFunc) http.Handler {
 	}
 	defer in.Close()
 	dbPath := filepath.Join(t.TempDir(), "places.db")
-	if _, err := importer.Import(cats, in, dbPath, importer.Meta{Region: "test", DataVersion: "2026-10-26"}); err != nil {
+	if _, err := importer.Import(cats, in, lines, dbPath, importer.Meta{Region: "test", DataVersion: "2026-10-26"}); err != nil {
 		t.Fatal(err)
 	}
 	places, err := Open(dbPath)
@@ -109,7 +120,8 @@ func TestSurroundings(t *testing.T) {
 		t.Errorf("fern address = %+v", fern.Address)
 	}
 
-	if parks := byID["park"]; len(parks) != 1 || parks[0].Name != nil || parks[0].ID != "way/5" {
+	// The location is on the edge of the park.
+	if parks := byID["park"]; len(parks) != 1 || parks[0].Name != nil || parks[0].ID != "way/5" || parks[0].DistanceMeters != 0 {
 		t.Errorf("parks = %+v", parks)
 	}
 	if len(byID["hospital"]) != 0 {
@@ -128,6 +140,15 @@ func TestSurroundingsCollapseSameName(t *testing.T) {
 	if want := []string{"node/7 Markt", "node/9 Rathaus"}; !slices.Equal(names, want) {
 		t.Errorf("bus stops = %v, want %v", names, want)
 	}
+	// Markt gets the lines of both stops with that name; the tram stop
+	// Rathaus gets its line through the stop area.
+	markt, rathaus := resp.Categories[0].Places[0], resp.Categories[0].Places[1]
+	if want := []transit.Line{{Mode: "bus", Ref: "4"}, {Mode: "bus", Ref: "23"}}; !slices.Equal(markt.Lines, want) {
+		t.Errorf("Markt lines = %v, want %v", markt.Lines, want)
+	}
+	if want := []transit.Line{{Mode: "tram", Ref: "6"}}; !slices.Equal(rathaus.Lines, want) {
+		t.Errorf("Rathaus lines = %v, want %v", rathaus.Lines, want)
+	}
 	// Supermarkets do not collapse: two shops of a chain are two places.
 	if n := len(resp.Categories[1].Places); n != 2 {
 		t.Errorf("got %d supermarkets, want 2", n)
@@ -143,10 +164,25 @@ func TestSurroundingsNullFields(t *testing.T) {
 	}
 	get(t, h, "/v1/surroundings?lat=53.0&lon=8.8&categories=park", http.StatusOK, &raw)
 	park := raw.Categories[0].Places[0]
-	for _, key := range []string{"name", "openingHours", "website", "wikidata"} {
+	for _, key := range []string{"name", "openingHours", "website", "wikidata", "lines"} {
 		if v, ok := park[key]; !ok || v != nil {
 			t.Errorf("%s = %v (present %v), want null", key, v, ok)
 		}
+	}
+}
+
+func TestSurroundingsDistanceToEdge(t *testing.T) {
+	h := newTestHandler(t, nil)
+	var resp surroundingsResponse
+	// The beach starts 0.01° east of the location (about 669 m); its
+	// centroid is almost 4 km away.
+	get(t, h, "/v1/surroundings?lat=53.0005&lon=8.8&categories=beach", http.StatusOK, &resp)
+	if beaches := resp.Categories[0].Places; len(beaches) != 1 || beaches[0].DistanceMeters != 669 || beaches[0].WalkingMinutes != 11 {
+		t.Errorf("beaches = %+v", beaches)
+	}
+	get(t, h, "/v1/surroundings?lat=53.0005&lon=8.85&categories=beach", http.StatusOK, &resp)
+	if beaches := resp.Categories[0].Places; len(beaches) != 1 || beaches[0].DistanceMeters != 0 {
+		t.Errorf("inside the beach: %+v", beaches)
 	}
 }
 
@@ -239,5 +275,23 @@ func TestHealth(t *testing.T) {
 	get(t, h, "/health", http.StatusOK, &body)
 	if body["status"] != "ok" {
 		t.Errorf("health = %v", body)
+	}
+}
+
+func TestOpenRejectsOldSchema(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "places.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`CREATE TABLE places (id INTEGER PRIMARY KEY, tags TEXT);
+		CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+		INSERT INTO meta VALUES ('data_version', '2026-01-01');`)
+	db.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Open(path); err == nil || !strings.Contains(err.Error(), "older version") {
+		t.Errorf("Open = %v, want an error about the old schema", err)
 	}
 }

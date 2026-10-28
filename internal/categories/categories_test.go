@@ -22,6 +22,12 @@ func TestLoadEmbedded(t *testing.T) {
 	if cat, ok := cfg.Get("bus_tram_stop"); !ok || !cat.CollapseSameName {
 		t.Error("bus_tram_stop should collapse places with the same name")
 	}
+	if cat, ok := cfg.Get("beach"); !ok || !cat.DistanceToEdge {
+		t.Error("beach should measure the distance to its edge")
+	}
+	if cat, ok := cfg.Get("supermarket"); !ok || cat.DistanceToEdge {
+		t.Error("supermarket should measure the distance to its centroid")
+	}
 }
 
 func TestMatch(t *testing.T) {
@@ -37,6 +43,10 @@ func TestMatch(t *testing.T) {
 		{map[string]string{"railway": "halt"}, "train_station"},
 		{map[string]string{"historic": "castle"}, "attraction"},
 		{map[string]string{"shop": "bakery", "amenity": "cafe"}, "cafe"},
+		{map[string]string{"amenity": "doctors", "healthcare:speciality": "paediatrics"}, "paediatrician"},
+		{map[string]string{"amenity": "hospital", "healthcare:speciality": "paediatrics"}, "hospital"},
+		{map[string]string{"amenity": "doctors", "healthcare:speciality": "general"}, "doctor"},
+		{map[string]string{"leisure": "bathing_place"}, "swimming"},
 		{map[string]string{"amenity": "bench"}, ""},
 		{map[string]string{"historic": "wayside_cross"}, ""},
 		{map[string]string{}, ""},

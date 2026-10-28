@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/ls-itsolutions/open-property-location/internal/categories"
+	"github.com/ls-itsolutions/open-property-location/internal/outline"
+	"github.com/ls-itsolutions/open-property-location/internal/transit"
 )
 
 const (
@@ -39,11 +41,15 @@ type place struct {
 	lat, lon   float64
 	importance float64
 	tags       map[string]string
+	lines      []transit.Line
+
+	minLat, maxLat, minLon, maxLon float64
+	outline                        []byte // only for areas of distanceToEdge categories
 }
 
 // toPlace maps a feature to a place. It reports false for features that do
 // not belong to any category or are filtered out.
-func toPlace(cfg *categories.Config, f feature) (place, bool, error) {
+func toPlace(cfg *categories.Config, lines *transit.Lines, f feature) (place, bool, error) {
 	tags := make(map[string]string, len(f.Properties))
 	for k, v := range f.Properties {
 		if s, ok := v.(string); ok && !strings.HasPrefix(k, "@") {
@@ -66,21 +72,28 @@ func toPlace(cfg *categories.Config, f feature) (place, bool, error) {
 	if err != nil {
 		return place{}, false, err
 	}
-	lat, lon, err := representativePoint(f.Geometry)
+	s, err := parseGeometry(f.Geometry)
 	if err != nil {
 		return place{}, false, fmt.Errorf("%s/%d: %w", osmType, osmID, err)
 	}
 
-	return place{
+	p := place{
 		osmType:    osmType,
 		osmID:      osmID,
 		category:   cat.ID,
 		name:       name,
-		lat:        lat,
-		lon:        lon,
 		importance: importance(tags),
 		tags:       storedTags(tags),
-	}, true, nil
+		lines:      lines.For(osmType, osmID),
+	}
+	p.lat, p.lon = s.representativePoint()
+	if cat.DistanceToEdge && s.polygons != nil {
+		p.minLat, p.maxLat, p.minLon, p.maxLon = s.bounds()
+		p.outline = outline.Encode(s.rings())
+	} else {
+		p.minLat, p.maxLat, p.minLon, p.maxLon = p.lat, p.lat, p.lon, p.lon
+	}
+	return p, true, nil
 }
 
 func osmRef(props map[string]any) (string, int64, error) {

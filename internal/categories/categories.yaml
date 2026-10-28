@@ -12,6 +12,9 @@
 #   collapseSameName   optional; return only the best ranked of several
 #                      places with the same name (OSM often maps one stop
 #                      per direction or line)
+#   distanceToEdge     optional; for areas, measure the distance to the
+#                      nearest edge instead of the centroid (0 inside). Only
+#                      worth it for large areas: the geometry is stored.
 #
 # An element that matches several categories belongs to the first one in
 # this file. The osmium filter for the data build is generated from these
@@ -39,6 +42,12 @@ categories:
     maxDistanceMeters: 2000
 
   # Shopping and everyday needs
+  - id: ice_cream
+    match:
+      - amenity=ice_cream
+    requireName: true
+    maxDistanceMeters: 2000
+
   - id: bakery
     match:
       - shop=bakery
@@ -57,18 +66,38 @@ categories:
     requireName: true
     maxDistanceMeters: 3000
 
-  # Health
-  - id: doctor
+  - id: post_office
     match:
-      - amenity=doctors,clinic
-    requireName: true
+      - amenity=post_office
+    requireName: false
     maxDistanceMeters: 3000
 
+  # Many cash machines have an operator but no name.
+  - id: atm
+    match:
+      - amenity=atm
+    requireName: false
+    maxDistanceMeters: 2000
+
+  # Health. hospital and paediatrician come before doctor, so a paediatric
+  # practice is a paediatrician and a children's hospital stays a hospital.
   - id: hospital
     match:
       - amenity=hospital
     requireName: true
     maxDistanceMeters: 15000
+
+  - id: paediatrician
+    match:
+      - healthcare:speciality=paediatrics
+    requireName: true
+    maxDistanceMeters: 5000
+
+  - id: doctor
+    match:
+      - amenity=doctors,clinic
+    requireName: true
+    maxDistanceMeters: 3000
 
   # Children and education
   - id: kindergarten
@@ -99,6 +128,13 @@ categories:
     maxDistanceMeters: 10000
     collapseSameName: true
 
+  - id: ferry_terminal
+    match:
+      - amenity=ferry_terminal
+    requireName: true
+    maxDistanceMeters: 10000
+    collapseSameName: true
+
   # Leisure and sights
   - id: attraction
     match:
@@ -112,18 +148,34 @@ categories:
       - natural=beach
     requireName: false
     maxDistanceMeters: 15000
+    distanceToEdge: true
+
+  # Bathing spots at lakes and rivers, and water parks.
+  - id: swimming
+    match:
+      - leisure=swimming_area,bathing_place,water_park
+    requireName: false
+    maxDistanceMeters: 10000
+    distanceToEdge: true
 
   - id: park
     match:
       - leisure=park
     requireName: false
     maxDistanceMeters: 2000
+    distanceToEdge: true
 
   - id: playground
     match:
       - leisure=playground
     requireName: false
     maxDistanceMeters: 1000
+
+  - id: fitness
+    match:
+      - leisure=fitness_centre
+    requireName: true
+    maxDistanceMeters: 3000
 
   # Mobility
   - id: parking
@@ -138,6 +190,12 @@ categories:
     requireName: false
     maxDistanceMeters: 3000
 
+  - id: bicycle_rental
+    match:
+      - amenity=bicycle_rental
+    requireName: false
+    maxDistanceMeters: 2000
+
 # Presets select categories for a use case. The order of the list is the
 # order of the groups in the response.
 presets:
@@ -146,23 +204,31 @@ presets:
     - restaurant
     - cafe
     - bar
+    - ice_cream
     - bakery
     - supermarket
     - pharmacy
+    - atm
     - bus_tram_stop
     - train_station
+    - ferry_terminal
     - attraction
     - beach
+    - swimming
     - park
     - parking
     - ev_charging
+    - bicycle_rental
 
   # Long-term rentals and properties for sale
   living:
     - supermarket
     - bakery
     - pharmacy
+    - post_office
+    - atm
     - doctor
+    - paediatrician
     - hospital
     - kindergarten
     - school
@@ -170,3 +236,4 @@ presets:
     - train_station
     - park
     - playground
+    - fitness

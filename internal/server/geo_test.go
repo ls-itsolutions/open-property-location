@@ -3,6 +3,8 @@ package server
 import (
 	"math"
 	"testing"
+
+	"github.com/ls-itsolutions/open-property-location/internal/outline"
 )
 
 func TestHaversine(t *testing.T) {
@@ -54,5 +56,29 @@ func TestBoundingBoxContainsRadius(t *testing.T) {
 	}
 	if _, _, minLon, maxLon := boundingBox(89.99, 0, radius); minLon != -180 || maxLon != 180 {
 		t.Errorf("box near the pole should span all longitudes, got %v..%v", minLon, maxLon)
+	}
+}
+
+func TestDistanceToArea(t *testing.T) {
+	// A square of 0.02° with a hole of 0.01° in the middle, around 53°N 8°E.
+	rings := []outline.Ring{
+		{{8.0, 53.0}, {8.02, 53.0}, {8.02, 53.02}, {8.0, 53.02}, {8.0, 53.0}},
+		{{8.005, 53.005}, {8.005, 53.015}, {8.015, 53.015}, {8.015, 53.005}, {8.005, 53.005}},
+	}
+	tests := []struct {
+		name     string
+		lat, lon float64
+		want     float64
+	}{
+		{"inside", 53.002, 8.01, 0},
+		{"in the hole", 53.01, 8.01, haversine(53.01, 8.01, 53.01, 8.015)},
+		{"south", 52.99, 8.01, haversine(52.99, 8.01, 53.0, 8.01)},
+		{"east", 53.01, 8.03, haversine(53.01, 8.03, 53.01, 8.02)},
+		{"corner", 52.99, 7.99, haversine(52.99, 7.99, 53.0, 8.0)},
+	}
+	for _, tt := range tests {
+		if got := distanceToArea(rings, tt.lat, tt.lon); math.Abs(got-tt.want) > 1 {
+			t.Errorf("%s: %.1f m, want %.1f m", tt.name, got, tt.want)
+		}
 	}
 }

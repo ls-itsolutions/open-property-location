@@ -3,10 +3,13 @@
 package main
 
 import (
+	"bufio"
+	"compress/gzip"
 	"context"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -22,6 +25,7 @@ import (
 	"github.com/ls-itsolutions/open-property-location/internal/geocode"
 	"github.com/ls-itsolutions/open-property-location/internal/importer"
 	"github.com/ls-itsolutions/open-property-location/internal/server"
+	"github.com/ls-itsolutions/open-property-location/internal/transit"
 )
 
 const (
@@ -38,8 +42,8 @@ const (
 
 const usage = `Usage:
   opl serve  [--data places.db] [--addr :8080] [--demo]
-  opl import --in places.geojsonseq --out places.db --region <name> --data-version YYYY-MM-DD
-  opl filter-expressions
+  opl import --in places.geojsonseq [--routes routes.osm.gz] --out places.db --region <name> --data-version YYYY-MM-DD
+  opl filter-expressions [--routes]
   opl healthcheck [--addr :8080]
 
 Environment: OPL_DATA, OPL_ADDR, PHOTON_URL (default https://photon.komoot.io)
@@ -58,7 +62,7 @@ func main() {
 	case "import":
 		err = runImport(args)
 	case "filter-expressions":
-		err = filterExpressions()
+		err = filterExpressions(args)
 	case "healthcheck":
 		err = healthcheck(args)
 	case "-h", "--help", "help":
@@ -154,6 +158,7 @@ func demoURL(addr string) string {
 func runImport(args []string) error {
 	fs := flag.NewFlagSet("import", flag.ExitOnError)
 	in := fs.String("in", "", "GeoJSON sequence from osmium export")
+	routes := fs.String("routes", "", "optional OSM XML (.osm or .osm.gz) with route and stop_area relations, for the lines of stops")
 	out := fs.String("out", "", "database to create")
 	region := fs.String("region", "", "region name stored in the database, e.g. germany")
 	dataVersion := fs.String("data-version", "", "date of the OSM extract, YYYY-MM-DD")
@@ -166,14 +171,20 @@ func runImport(args []string) error {
 	if err != nil {
 		return err
 	}
+	start := time.Now()
+	var lines *transit.Lines
+	if *routes != "" {
+		if lines, err = readLines(*routes); err != nil {
+			return err
+		}
+	}
 	f, err := os.Open(*in)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 
-	start := time.Now()
-	counts, err := importer.Import(cats, f, *out, importer.Meta{Region: *region, DataVersion: *dataVersion})
+	counts, err := importer.Import(cats, f, lines, *out, importer.Meta{Region: *region, DataVersion: *dataVersion})
 	if err != nil {
 		return err
 	}
@@ -191,12 +202,44 @@ func runImport(args []string) error {
 	return nil
 }
 
-func filterExpressions() error {
-	cats, err := categories.Load()
+// readLines reads route relations from OSM XML, gzipped if the name ends in
+// .gz.
+func readLines(path string) (*transit.Lines, error) {
+	f, err := os.Open(path)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	fmt.Println(strings.Join(cats.FilterExpressions(), "\n"))
+	defer f.Close()
+	var r io.Reader = bufio.NewReader(f)
+	if strings.HasSuffix(path, ".gz") {
+		gz, err := gzip.NewReader(r)
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", path, err)
+		}
+		defer gz.Close()
+		r = gz
+	}
+	lines, err := transit.ReadLines(r)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	return lines, nil
+}
+
+func filterExpressions(args []string) error {
+	fs := flag.NewFlagSet("filter-expressions", flag.ExitOnError)
+	routes := fs.Bool("routes", false, "print the expressions for route and stop_area relations instead")
+	fs.Parse(args)
+
+	exprs := transit.FilterExpressions()
+	if !*routes {
+		cats, err := categories.Load()
+		if err != nil {
+			return err
+		}
+		exprs = cats.FilterExpressions()
+	}
+	fmt.Println(strings.Join(exprs, "\n"))
 	return nil
 }
 

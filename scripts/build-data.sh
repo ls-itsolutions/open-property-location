@@ -44,6 +44,13 @@ echo "==> filtering tags"
 "$work/opl" filter-expressions > "$work/filters.txt"
 osmium tags-filter --expressions="$work/filters.txt" \
   -o "$work/filtered.osm.pbf" "$work/region.osm.pbf"
+
+echo "==> extracting public transport routes"
+# Only the relations themselves: the importer needs the ids of their
+# members, not the members.
+"$work/opl" filter-expressions --routes > "$work/route-filters.txt"
+osmium tags-filter --omit-referenced --expressions="$work/route-filters.txt" \
+  -o "$work/routes.osm.gz" "$work/region.osm.pbf"
 rm "$work/region.osm.pbf"
 
 echo "==> exporting geometries"
@@ -54,8 +61,8 @@ osmium export --geometry-types=point,polygon --attributes=type,id \
   -o "$work/places.geojsonseq" "$work/filtered.osm.pbf"
 
 echo "==> importing"
-"$work/opl" import --in "$work/places.geojsonseq" --out "$out_dir/places.db" \
-  --region "$region" --data-version "$data_version"
+"$work/opl" import --in "$work/places.geojsonseq" --routes "$work/routes.osm.gz" \
+  --out "$out_dir/places.db" --region "$region" --data-version "$data_version"
 
 echo "$data_version" > "$out_dir/data-version"
 echo "==> done: $out_dir/places.db ($data_version)"

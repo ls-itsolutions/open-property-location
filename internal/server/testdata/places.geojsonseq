@@ -7,3 +7,4 @@
 {"type":"Feature","geometry":{"type":"Point","coordinates":[8.8001,53.0]},"properties":{"@type":"node","@id":7,"highway":"bus_stop","name":"Markt"}}
 {"type":"Feature","geometry":{"type":"Point","coordinates":[8.8,53.0001]},"properties":{"@type":"node","@id":8,"highway":"bus_stop","name":"Markt"}}
 {"type":"Feature","geometry":{"type":"Point","coordinates":[8.8,53.0005]},"properties":{"@type":"node","@id":9,"railway":"tram_stop","name":"Rathaus"}}
+{"type":"Feature","geometry":{"type":"Polygon","coordinates":[[[8.81,53.0],[8.9,53.0],[8.9,53.001],[8.81,53.001],[8.81,53.0]]]},"properties":{"@type":"way","@id":10,"natural":"beach","name":"Langer Strand"}}

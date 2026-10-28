@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/ls-itsolutions/open-property-location/internal/categories"
+	"github.com/ls-itsolutions/open-property-location/internal/outline"
 )
 
 func TestImport(t *testing.T) {
@@ -24,7 +25,7 @@ func TestImport(t *testing.T) {
 	defer in.Close()
 
 	out := filepath.Join(t.TempDir(), "places.db")
-	counts, err := Import(cfg, in, out, Meta{Region: "test", DataVersion: "2026-10-26"})
+	counts, err := Import(cfg, in, nil, out, Meta{Region: "test", DataVersion: "2026-10-26"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,6 +93,50 @@ func TestImport(t *testing.T) {
 		t.Errorf("rtree lookup = %d, %v", rtreeRows, err)
 	}
 
+	// Parks and beaches measure the distance to their edge, so the R*Tree
+	// holds their bounding box and the outline is stored. Other places are
+	// points.
+	box := func(osmType string, osmID int) [4]float64 {
+		t.Helper()
+		var b [4]float64
+		err := db.QueryRow(`SELECT r.min_lat, r.max_lat, r.min_lon, r.max_lon
+			FROM places_rtree r JOIN places p ON p.id = r.id WHERE p.osm_type = ? AND p.osm_id = ?`, osmType, osmID).
+			Scan(&b[0], &b[1], &b[2], &b[3])
+		if err != nil {
+			t.Fatalf("%s/%d: %v", osmType, osmID, err)
+		}
+		return b
+	}
+	near := func(a, b [4]float64) bool {
+		for i := range a {
+			// The R*Tree stores 32-bit floats.
+			if math.Abs(a[i]-b[i]) > 1e-5 {
+				return false
+			}
+		}
+		return true
+	}
+	if b := box("way", 4); !near(b, [4]float64{53.0, 53.002, 8.8, 8.802}) {
+		t.Errorf("park box = %v", b)
+	}
+	if b := box("relation", 8); !near(b, [4]float64{0, 4, 0, 4}) {
+		t.Errorf("beach box = %v", b)
+	}
+	if b := box("node", 1); !near(b, [4]float64{53.0, 53.0, 8.8, 8.8}) {
+		t.Errorf("restaurant box = %v", b)
+	}
+	var blob []byte
+	if err := db.QueryRow(`SELECT outline FROM places WHERE osm_type = 'relation' AND osm_id = 8`).Scan(&blob); err != nil {
+		t.Fatal(err)
+	}
+	if rings, err := outline.Decode(blob); err != nil || len(rings) != 2 || len(rings[1]) != 5 {
+		t.Errorf("beach outline = %v, %v", rings, err)
+	}
+	var withOutline int
+	if err := db.QueryRow(`SELECT count(*) FROM places WHERE outline IS NOT NULL`).Scan(&withOutline); err != nil || withOutline != 2 {
+		t.Errorf("places with outline = %d, %v; want park and beach only", withOutline, err)
+	}
+
 	var version string
 	if err := db.QueryRow(`SELECT value FROM meta WHERE key = 'data_version'`).Scan(&version); err != nil || version != "2026-10-26" {
 		t.Errorf("data_version = %q, %v", version, err)
@@ -107,9 +152,15 @@ func TestImportKeepsExistingFileOnError(t *testing.T) {
 	if err := os.WriteFile(out, []byte("old"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	bad := `{"type":"Feature","geometry":{"type":"LineString","coordinates":[[0,0],[1,1]]},"properties":{"@type":"way","@id":1,"leisure":"park"}}`
-	if _, err := Import(cfg, strings.NewReader(bad), out, Meta{Region: "test", DataVersion: "2026-10-26"}); err == nil {
-		t.Fatal("expected error for unsupported geometry")
+	for _, geometry := range []string{
+		`{"type":"LineString","coordinates":[[0,0],[1,1]]}`,
+		`{"type":"MultiPolygon","coordinates":null}`,
+		`{"type":"Polygon","coordinates":[[[0,0],[200,0],[0,1],[0,0]]]}`,
+	} {
+		bad := `{"type":"Feature","geometry":` + geometry + `,"properties":{"@type":"way","@id":1,"leisure":"park"}}`
+		if _, err := Import(cfg, strings.NewReader(bad), nil, out, Meta{Region: "test", DataVersion: "2026-10-26"}); err == nil {
+			t.Fatalf("%s: expected error", geometry)
+		}
 	}
 	if data, _ := os.ReadFile(out); string(data) != "old" {
 		t.Error("existing database was replaced")
@@ -160,10 +211,7 @@ func TestWebsite(t *testing.T) {
 
 func TestCentroidDegenerate(t *testing.T) {
 	line := [][][]point{{{{1, 1}, {3, 3}, {1, 1}}}}
-	got, err := centroid(line)
-	if err != nil {
-		t.Fatal(err)
-	}
+	got := centroid(line)
 	if want := (point{2, 2}); math.Abs(got[0]-want[0]) > 1e-9 || math.Abs(got[1]-want[1]) > 1e-9 {
 		t.Errorf("centroid = %v, want %v", got, want)
 	}

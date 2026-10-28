@@ -16,6 +16,8 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/ls-itsolutions/open-property-location/internal/categories"
+	"github.com/ls-itsolutions/open-property-location/internal/outline"
+	"github.com/ls-itsolutions/open-property-location/internal/transit"
 )
 
 // maxConnections bounds memory use: every connection has its own page cache.
@@ -59,6 +61,9 @@ func (p *Places) readMeta() error {
 	if err := p.db.QueryRow(`SELECT value FROM meta WHERE key = 'data_version'`).Scan(&p.dataVersion); err != nil {
 		return err
 	}
+	if _, err := p.db.Exec(`SELECT lines, outline FROM places LIMIT 0`); err != nil {
+		return fmt.Errorf("built by an older version of opl, rebuild it: %w", err)
+	}
 	rows, err := p.db.Query(`SELECT key, id FROM categories`)
 	if err != nil {
 		return err
@@ -95,12 +100,13 @@ type Place struct {
 	Lon            float64 `json:"lon"`
 	DistanceMeters int     `json:"distanceMeters"`
 	// WalkingMinutes is estimated from the straight-line distance.
-	WalkingMinutes int     `json:"walkingMinutes"`
-	Address        Address `json:"address"`
-	OpeningHours   *string `json:"openingHours"`
-	Website        *string `json:"website"`
-	Wikidata       *string `json:"wikidata"`
-	OSMURL         string  `json:"osmUrl"`
+	WalkingMinutes int            `json:"walkingMinutes"`
+	Address        Address        `json:"address"`
+	OpeningHours   *string        `json:"openingHours"`
+	Website        *string        `json:"website"`
+	Wikidata       *string        `json:"wikidata"`
+	Lines          []transit.Line `json:"lines"`
+	OSMURL         string         `json:"osmUrl"`
 }
 
 type Address struct {
@@ -117,6 +123,8 @@ type candidate struct {
 	lat, lon   float64
 	importance float64
 	tags       string
+	lines      sql.NullString
+	outline    []byte
 	distance   float64
 	score      float64
 }
@@ -132,7 +140,7 @@ func (p *Places) Nearby(ctx context.Context, cat *categories.Category, lat, lon 
 	radius := float64(cat.MaxDistanceMeters)
 	minLat, maxLat, minLon, maxLon := boundingBox(lat, lon, radius)
 	rows, err := p.db.QueryContext(ctx, `
-		SELECT p.osm_type, p.osm_id, p.name, p.lat, p.lon, p.importance, p.tags
+		SELECT p.osm_type, p.osm_id, p.name, p.lat, p.lon, p.importance, p.tags, p.lines, p.outline
 		FROM places_rtree r JOIN places p ON p.id = r.id
 		WHERE r.min_lat <= ? AND r.max_lat >= ? AND r.min_lon <= ? AND r.max_lon >= ?
 		  AND r.min_cat = ?`,
@@ -145,10 +153,17 @@ func (p *Places) Nearby(ctx context.Context, cat *categories.Category, lat, lon 
 	var candidates []candidate
 	for rows.Next() {
 		var c candidate
-		if err := rows.Scan(&c.osmType, &c.osmID, &c.name, &c.lat, &c.lon, &c.importance, &c.tags); err != nil {
+		if err := rows.Scan(&c.osmType, &c.osmID, &c.name, &c.lat, &c.lon, &c.importance, &c.tags, &c.lines, &c.outline); err != nil {
 			return nil, err
 		}
 		c.distance = haversine(lat, lon, c.lat, c.lon)
+		if c.outline != nil {
+			rings, err := outline.Decode(c.outline)
+			if err != nil {
+				return nil, fmt.Errorf("%s/%d: %w", c.osmType, c.osmID, err)
+			}
+			c.distance = distanceToArea(rings, lat, lon)
+		}
 		if c.distance > radius {
 			continue
 		}
@@ -169,30 +184,56 @@ func (p *Places) Nearby(ctx context.Context, cat *categories.Category, lat, lon 
 	})
 
 	places := make([]Place, 0, min(limit, len(candidates)))
-	seenNames := make(map[string]bool)
+	// Index in places of the place returned for a name. The lines of all
+	// stops with that name are merged into it.
+	byName := make(map[string]int)
 	for _, c := range candidates {
-		if len(places) == limit {
-			break
-		}
-		if cat.CollapseSameName && c.name.Valid {
-			if seenNames[c.name.String] {
-				continue
+		collapse := cat.CollapseSameName && c.name.Valid
+		if i, seen := byName[c.name.String]; collapse && seen {
+			lines, err := c.decodeLines()
+			if err != nil {
+				return nil, err
 			}
-			seenNames[c.name.String] = true
+			places[i].Lines = transit.Sort(append(places[i].Lines, lines...))
+			continue
+		}
+		if len(places) == limit {
+			if !cat.CollapseSameName {
+				break
+			}
+			continue
 		}
 		place, err := c.toPlace()
 		if err != nil {
 			return nil, err
+		}
+		if collapse {
+			byName[c.name.String] = len(places)
 		}
 		places = append(places, place)
 	}
 	return places, nil
 }
 
+func (c candidate) decodeLines() ([]transit.Line, error) {
+	if !c.lines.Valid {
+		return nil, nil
+	}
+	var lines []transit.Line
+	if err := json.Unmarshal([]byte(c.lines.String), &lines); err != nil {
+		return nil, fmt.Errorf("%s/%d: invalid lines: %w", c.osmType, c.osmID, err)
+	}
+	return lines, nil
+}
+
 func (c candidate) toPlace() (Place, error) {
 	var tags map[string]string
 	if err := json.Unmarshal([]byte(c.tags), &tags); err != nil {
 		return Place{}, fmt.Errorf("%s/%d: invalid tags: %w", c.osmType, c.osmID, err)
+	}
+	lines, err := c.decodeLines()
+	if err != nil {
+		return Place{}, err
 	}
 	optional := func(key string) *string {
 		if v, ok := tags[key]; ok {
@@ -216,6 +257,7 @@ func (c candidate) toPlace() (Place, error) {
 		OpeningHours: optional("opening_hours"),
 		Website:      optional("website"),
 		Wikidata:     optional("wikidata"),
+		Lines:        lines,
 		OSMURL:       "https://www.openstreetmap.org/" + id,
 	}
 	if c.name.Valid {

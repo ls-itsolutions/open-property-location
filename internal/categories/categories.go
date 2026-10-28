@@ -26,6 +26,7 @@ type Category struct {
 	RequireName       bool
 	MaxDistanceMeters int
 	CollapseSameName  bool
+	DistanceToEdge    bool
 	matchers          []matcher
 }
 
@@ -62,6 +63,7 @@ type fileFormat struct {
 		RequireName       bool     `yaml:"requireName"`
 		MaxDistanceMeters int      `yaml:"maxDistanceMeters"`
 		CollapseSameName  bool     `yaml:"collapseSameName"`
+		DistanceToEdge    bool     `yaml:"distanceToEdge"`
 	} `yaml:"categories"`
 	Presets map[string][]string `yaml:"presets"`
 }
@@ -102,6 +104,7 @@ func Parse(data []byte) (*Config, error) {
 			RequireName:       c.RequireName,
 			MaxDistanceMeters: c.MaxDistanceMeters,
 			CollapseSameName:  c.CollapseSameName,
+			DistanceToEdge:    c.DistanceToEdge,
 		}
 		for _, raw := range c.Match {
 			m, err := parseMatcher(raw)
