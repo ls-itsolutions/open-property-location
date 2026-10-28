@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/ls-itsolutions/open-property-location/internal/categories"
+	"github.com/ls-itsolutions/open-property-location/internal/demo"
 	"github.com/ls-itsolutions/open-property-location/internal/geocode"
 	"github.com/ls-itsolutions/open-property-location/internal/importer"
 	"github.com/ls-itsolutions/open-property-location/internal/server"
@@ -36,7 +37,7 @@ const (
 )
 
 const usage = `Usage:
-  opl serve  [--data places.db] [--addr :8080]
+  opl serve  [--data places.db] [--addr :8080] [--demo]
   opl import --in places.geojsonseq --out places.db --region <name> --data-version YYYY-MM-DD
   opl filter-expressions
   opl healthcheck [--addr :8080]
@@ -84,6 +85,7 @@ func serve(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	data := fs.String("data", env("OPL_DATA", defaultData), "path to places.db")
 	addr := fs.String("addr", env("OPL_ADDR", defaultAddr), "listen address")
+	withDemo := fs.Bool("demo", false, "also serve a demo page at /demo/")
 	fs.Parse(args)
 
 	cats, err := categories.Load()
@@ -100,9 +102,18 @@ func serve(args []string) error {
 	}
 	defer places.Close()
 
+	handler := server.New(places, cats, geocoder)
+	if *withDemo {
+		mux := http.NewServeMux()
+		mux.Handle("/", handler)
+		mux.Handle("GET /{$}", http.RedirectHandler("demo/", http.StatusFound))
+		mux.Handle("GET /demo/", demo.Handler())
+		handler = mux
+	}
+
 	srv := &http.Server{
 		Addr:              *addr,
-		Handler:           server.New(places, cats, geocoder),
+		Handler:           handler,
 		ReadHeaderTimeout: readHeaderTimeout,
 		WriteTimeout:      writeTimeout,
 		IdleTimeout:       idleTimeout,
@@ -113,6 +124,9 @@ func serve(args []string) error {
 	errc := make(chan error, 1)
 	go func() { errc <- srv.ListenAndServe() }()
 	slog.Info("listening", "addr", *addr, "data", *data, "dataVersion", places.DataVersion())
+	if *withDemo {
+		slog.Info("demo ready", "url", demoURL(*addr))
+	}
 
 	select {
 	case err := <-errc:
@@ -122,6 +136,19 @@ func serve(args []string) error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 	return srv.Shutdown(shutdownCtx)
+}
+
+// demoURL guesses the browser URL of the demo page. In a container the
+// published port can differ from the one the server listens on.
+func demoURL(addr string) string {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return "/demo/"
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "localhost"
+	}
+	return "http://" + net.JoinHostPort(host, port) + "/demo/"
 }
 
 func runImport(args []string) error {

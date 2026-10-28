@@ -36,6 +36,18 @@ and `linux/arm64`.
 | `germany-YYYY-MM-DD` | binary + data of that OSM extract date |
 | `<version>`, e.g. `1.0.0` | binary only; mount your own `places.db` at `/data/places.db` |
 
+### Demo page
+
+To try it in the browser, start the server with `--demo`:
+
+```sh
+docker run -p 8080:8080 ghcr.io/ls-itsolutions/open-property-location:germany serve --demo
+```
+
+and open <http://localhost:8080/demo/>. Enter an address or `lat, lon`,
+pick a preset and see the results next to the raw API response. The page
+is off by default and has no dependencies besides the API itself.
+
 ## API
 
 ### `GET /v1/surroundings`
@@ -210,6 +222,7 @@ docker build --target germany --build-context data=out -t my-surroundings .
 |---|---|---|
 | `serve --data` | `OPL_DATA` | `places.db` (`/data/places.db` in the image) |
 | `serve --addr` | `OPL_ADDR` | `:8080` |
+| `serve --demo` | | off; serves the [demo page](#demo-page) at `/demo/` |
 | | `PHOTON_URL` | `https://photon.komoot.io` |
 
 The service has no authentication, rate limiting or CORS. Run it on an

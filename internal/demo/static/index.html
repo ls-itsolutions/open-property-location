@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenPropertyLocation demo</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="style.css">
+<script src="app.js" defer></script>
+</head>
+<body>
+<header>
+  <h1>OpenPropertyLocation <span class="tag">demo</span></h1>
+  <p>Enter an address or coordinates to see what is around.</p>
+</header>
+
+<main>
+  <form id="search">
+    <label class="query">
+      <span>Address or lat, lon</span>
+      <input name="q" required autocomplete="off" placeholder="Alexanderplatz, Berlin or 52.5219, 13.4132">
+    </label>
+    <label>
+      <span>Preset</span>
+      <select name="preset"></select>
+    </label>
+    <label>
+      <span>Per category</span>
+      <select name="limit">
+        <option>3</option>
+        <option selected>5</option>
+        <option>10</option>
+        <option>20</option>
+      </select>
+    </label>
+    <button>Search</button>
+  </form>
+
+  <p id="status" role="status"></p>
+
+  <section id="summary" hidden>
+    <p>
+      <span id="location"></span> ·
+      <a id="map" target="_blank" rel="noopener">map</a> ·
+      data from <span id="data-version"></span>
+    </p>
+  </section>
+  <div id="results"></div>
+
+  <details id="raw" hidden>
+    <summary>API response</summary>
+    <p><a id="request" target="_blank" rel="noopener"></a></p>
+    <pre id="json"></pre>
+  </details>
+</main>
+
+<footer>
+  Data <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors, ODbL</a>.
+  Walking times are estimates from the straight-line distance.
+</footer>
+
+<template id="category">
+  <section class="category">
+    <h2><span class="label"></span> <span class="radius"></span></h2>
+    <ol></ol>
+  </section>
+</template>
+
+<template id="place">
+  <li>
+    <div class="line">
+      <span class="name"></span>
+      <span class="distance"></span>
+    </div>
+    <div class="details"></div>
+  </li>
+</template>
+</body>
+</html>

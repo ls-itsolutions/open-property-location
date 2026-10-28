@@ -334,6 +334,13 @@ opl filter-expressions   # prints the osmium tags-filter expressions from catego
 Configuration through flags with env fallbacks (`OPL_DATA`, `OPL_ADDR`,
 `PHOTON_URL`). Nothing else.
 
+`opl serve --demo` additionally serves a demo page at `/demo/` (address or
+coordinates in, preset dropdown, results and raw JSON out). It is off by
+default, embedded into the binary, plain HTML/CSS/JS without external
+resources, and only talks to the API of the same server.
+`opl healthcheck` exists for the Docker healthcheck (no curl in
+distroless).
+
 ---
 
 # Docker
@@ -398,6 +405,7 @@ internal/categories/       # categories.yaml (embedded), parsing, matching
 internal/importer/         # geojsonseq → places.db
 internal/server/           # HTTP handlers, query, ranking
 internal/geocode/          # Photon client
+internal/demo/             # opt-in demo page (serve --demo)
 scripts/build-data.sh
 Dockerfile
 .github/workflows/ci.yml
@@ -485,9 +493,10 @@ and report instead of silently working around it.
 
 ---
 
-# Open points (verify during implementation)
+# Verified
 
-1. **`places.db` size** for Germany: expected to be a few hundred MB.
-   Measure it after the first real build. If it is much larger, revisit
-   whether to bake the data into the image.
-2. **R\*Tree in `modernc.org/sqlite`**: verify first (see Stack).
+1. **`places.db` size** for Germany: 286 MB with 1.69 million places
+   (first build, October 2026). The full build takes about 7 minutes on
+   the standard runner. Revisit baking the data into the image if it grows
+   far beyond that.
+2. **R\*Tree in `modernc.org/sqlite`**: supported, no cgo needed.
