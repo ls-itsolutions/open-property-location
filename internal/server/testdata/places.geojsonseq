@@ -1,0 +1,9 @@
+{"type":"Feature","geometry":{"type":"Point","coordinates":[8.8,53.0008993]},"properties":{"@type":"node","@id":1,"shop":"bakery","name":"Nah"}}
+{"type":"Feature","geometry":{"type":"Point","coordinates":[8.8,53.001349]},"properties":{"@type":"node","@id":2,"shop":"bakery","name":"Fern","wikidata":"Q1","website":"https://fern.example","addr:street":"Hauptstraße","addr:housenumber":"1"}}
+{"type":"Feature","geometry":{"type":"Point","coordinates":[8.8,53.02]},"properties":{"@type":"node","@id":3,"shop":"bakery","name":"Weit"}}
+{"type":"Feature","geometry":{"type":"Point","coordinates":[8.8,53.001]},"properties":{"@type":"node","@id":4,"shop":"supermarket","name":"Markt"}}
+{"type":"Feature","geometry":{"type":"MultiPolygon","coordinates":[[[[8.799,53.0],[8.801,53.0],[8.801,53.001],[8.799,53.001],[8.799,53.0]]]]},"properties":{"@type":"way","@id":5,"leisure":"park"}}
+{"type":"Feature","geometry":{"type":"Point","coordinates":[8.8,53.002]},"properties":{"@type":"node","@id":6,"shop":"supermarket","name":"Markt"}}
+{"type":"Feature","geometry":{"type":"Point","coordinates":[8.8001,53.0]},"properties":{"@type":"node","@id":7,"highway":"bus_stop","name":"Markt"}}
+{"type":"Feature","geometry":{"type":"Point","coordinates":[8.8,53.0001]},"properties":{"@type":"node","@id":8,"highway":"bus_stop","name":"Markt"}}
+{"type":"Feature","geometry":{"type":"Point","coordinates":[8.8,53.0005]},"properties":{"@type":"node","@id":9,"railway":"tram_stop","name":"Rathaus"}}
