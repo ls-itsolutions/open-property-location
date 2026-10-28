@@ -1,65 +1,115 @@
+<div align="center">
+
 # OpenPropertyLocation
+
+**What's around this address?**<br>
+Send an address, get the nearest supermarkets, bakeries, schools, stops and
+beaches with walking times and transit lines. Self-hosted, built on
+OpenStreetMap, one `docker run`.
 
 [![CI](https://github.com/ls-itsolutions/open-property-location/actions/workflows/ci.yml/badge.svg)](https://github.com/ls-itsolutions/open-property-location/actions/workflows/ci.yml)
 [![Data](https://github.com/ls-itsolutions/open-property-location/actions/workflows/data.yml/badge.svg)](https://github.com/ls-itsolutions/open-property-location/actions/workflows/data.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-A small, self-hostable HTTP service: **coordinates or an address in,
-structured surroundings out.**
-
-For a location it returns the nearest supermarkets, bakeries, bus stops,
-train stations, schools, beaches and more, grouped by category, with
-distance and an estimated walking time, and the bus, tram and train lines
-serving each stop. It is built on OpenStreetMap data, and prebuilt images
-for Germany, Austria and Switzerland are available.
-
-It is meant for property listings and vacation rentals: the "around the
-stay" section of a guest page, or structured location facts next to the
-free-text description of a flat for rent or sale.
-
-**What it does not do:** OpenStreetMap has no ratings, so this service
-returns facts about the surroundings, not quality judgements. There are no
-reviews, photos, opening-hours evaluation, isochrones or real routing.
-
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/demo-dark.png">
-  <img alt="Demo page: places around a location in Warnemünde grouped by category, with distances, walking times and the lines serving stops and stations" src="docs/demo-light.png">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/demo-dark.gif">
+  <img alt="Entering an address in the demo page shows the nearest restaurants, cafés, stops and train stations with walking times and lines; the living preset shows schools and kindergartens" src="docs/demo-light.gif">
 </picture>
 
-## Quick start
+</div>
 
-```sh
-docker run -p 8080:8080 ghcr.io/ls-itsolutions/open-property-location:germany
-```
-
-```sh
-curl 'http://localhost:8080/v1/surroundings?lat=54.1776&lon=12.0838&preset=stay'
-```
-
-The `germany` image contains the binary and the latest weekly data. It
-needs well under 128 MB of RAM and runs as a non-root user on `linux/amd64`
-and `linux/arm64`.
-
-| Image tag | Contents |
-|---|---|
-| `germany`, `austria`, `switzerland` | binary + latest data of the country, rebuilt weekly |
-| `germany-YYYY-MM-DD` (and so on) | binary + data of that OSM extract date |
-| `<version>`, e.g. `1.1.0` | binary only; mount your own `places.db` at `/data/places.db` |
-
-The databases are also attached to the GitHub releases `data-germany`,
-`data-austria` and `data-switzerland`.
-
-### Demo page
-
-To try it in the browser, start the server with `--demo`:
+## Try it
 
 ```sh
 docker run -p 8080:8080 ghcr.io/ls-itsolutions/open-property-location:germany serve --demo
 ```
 
-and open <http://localhost:8080/demo/>. Enter an address or `lat, lon`,
-pick a preset and see the results next to the raw API response. The page
-is off by default and has no dependencies besides the API itself.
+Open <http://localhost:8080/demo/> for the page above, or ask the API:
+
+```sh
+curl -G http://localhost:8080/v1/surroundings \
+  --data-urlencode 'address=Am Strom 59, Rostock' \
+  -d categories=supermarket,train_station -d limit=1
+```
+
+```jsonc
+{
+  "location": { "lat": 54.1766006, "lon": 12.0881239 },
+  "categories": [
+    {
+      "id": "supermarket",
+      "places": [{ "name": "Edeka", "distanceMeters": 230, "walkingMinutes": 4, /* … */ }]
+    },
+    {
+      "id": "train_station",
+      "places": [{
+        "name": "Warnemünde", "distanceMeters": 182, "walkingMinutes": 3,
+        "lines": [{ "mode": "train", "ref": "S1" }, { "mode": "train", "ref": "S2" }, /* … */ ],
+        /* … */
+      }]
+    }
+  ],
+  "dataVersion": "2026-10-27",
+  "attribution": "© OpenStreetMap contributors, ODbL"
+}
+```
+
+## Use it in your app
+
+One GET request, no API key, no SDK:
+
+```js
+const url = new URL("http://localhost:8080/v1/surroundings");
+url.searchParams.set("address", "Am Strom 59, Rostock");
+url.searchParams.set("categories", "supermarket,school,train_station");
+url.searchParams.set("limit", "1");
+
+const { categories } = await fetch(url).then((r) => r.json());
+for (const { id, places } of categories) {
+  for (const place of places) {
+    console.log(`${id}: ${place.name}, ${place.walkingMinutes} min walk`);
+  }
+}
+// supermarket: Edeka, 4 min walk
+// school: Ecolea - Internationale Schule Rostock, 5 min walk
+// train_station: Warnemünde, 3 min walk
+```
+
+Or ask for a whole preset with `preset=stay` (holiday rentals) or
+`preset=living` (flats and houses) and get up to five places for each of
+their categories. Call it from your backend once per property, cache the
+result and show the `attribution` next to it.
+
+## Why
+
+- **One container, data included.** Germany, Austria and Switzerland,
+  rebuilt weekly from OpenStreetMap. No API key, no database server, under
+  128 MB of RAM.
+- **Ready to display.** 26 categories, grouped and ranked, with walking
+  minutes, the bus, tram and train lines at each stop, and the distance to
+  the edge of beaches and parks.
+- **Address or coordinates.** Addresses are geocoded with
+  [Photon](https://photon.komoot.io); stored coordinates need no geocoder,
+  so nothing leaves your network.
+- **Open.** MIT-licensed code, ODbL data in a single SQLite file.
+
+**What it does not do:** OpenStreetMap has no ratings, so this service
+returns facts about the surroundings, not quality judgements. There are no
+reviews, photos, opening-hours evaluation, isochrones or real routing.
+
+## Compared to other options
+
+- **Overpass API:** raw OpenStreetMap queries. The public instances are
+  rate-limited and not meant for production use, and you get raw elements
+  without categories, ranking or walking times.
+- **Hosted places APIs** (Google Places, Geoapify and others): more data,
+  some with ratings, but paid beyond a free tier, often with terms on
+  caching and displaying results, and your coordinates leave your network.
+- **openpoiservice:** self-hosted points of interest from OpenStreetMap,
+  but it needs PostGIS and has no presets, ranking or address input.
+- **Walk Score and similar scores:** one proprietary number per location.
+  OpenPropertyLocation returns the places themselves, so you decide how to
+  present them.
 
 ## API
 
@@ -168,6 +218,9 @@ healthcheck (`opl healthcheck`).
 
 ## Categories and presets
 
+<details>
+<summary>All 26 categories with their OSM tags and search radius</summary>
+
 | id | OSM tags | Radius |
 |---|---|---|
 | `restaurant` | `amenity=restaurant` | 2 km |
@@ -196,6 +249,8 @@ healthcheck (`opl healthcheck`).
 | `parking` | `amenity=parking` | 1 km |
 | `ev_charging` | `amenity=charging_station` | 3 km |
 | `bicycle_rental` | `amenity=bicycle_rental` | 2 km |
+
+</details>
 
 Presets:
 
@@ -226,7 +281,40 @@ for serving. To change categories, radii or presets, fork the repository,
 edit the file, and rebuild the binary and the data (see below). Changes to
 `match` and `distanceToEdge` only take effect after the data is rebuilt.
 
-## Building data
+## Running it
+
+| Image tag | Contents |
+|---|---|
+| `germany`, `austria`, `switzerland` | binary + latest data of the country, rebuilt weekly |
+| `germany-YYYY-MM-DD` (and so on) | binary + data of that OSM extract date |
+| `<version>`, e.g. `1.1.0` | binary only; mount your own `places.db` at `/data/places.db` |
+
+The images need well under 128 MB of RAM and run as a non-root user on
+`linux/amd64` and `linux/arm64`. Without `serve --demo` they serve only the
+API. The databases are also attached to the GitHub releases `data-germany`,
+`data-austria` and `data-switzerland`.
+
+### Configuration
+
+| Flag | Environment | Default |
+|---|---|---|
+| `serve --data` | `OPL_DATA` | `places.db` (`/data/places.db` in the image) |
+| `serve --addr` | `OPL_ADDR` | `:8080` |
+| `serve --demo` | | off; serves the [demo page](#try-it) at `/demo/` |
+| | `PHOTON_URL` | `https://photon.komoot.io` |
+
+The service has no authentication, rate limiting or CORS. Run it on an
+internal network or behind your own reverse proxy.
+
+#### Geocoding and Photon fair use
+
+Address input is forwarded to Photon. The public instance at
+`photon.komoot.io` is provided by Komoot under a
+[fair-use policy](https://photon.komoot.io): it is fine for occasional
+requests, but if you geocode a lot, run your own Photon instance and set
+`PHOTON_URL`. Coordinates input never calls the geocoder.
+
+### Building data
 
 `places.db` is a single SQLite file built from a
 [Geofabrik](https://download.geofabrik.de/) extract. You need Go and
@@ -258,40 +346,6 @@ or build an image with the data baked in:
 ```sh
 docker build --target with-data --build-context data=out -t my-surroundings .
 ```
-
-## Configuration
-
-| Flag | Environment | Default |
-|---|---|---|
-| `serve --data` | `OPL_DATA` | `places.db` (`/data/places.db` in the image) |
-| `serve --addr` | `OPL_ADDR` | `:8080` |
-| `serve --demo` | | off; serves the [demo page](#demo-page) at `/demo/` |
-| | `PHOTON_URL` | `https://photon.komoot.io` |
-
-The service has no authentication, rate limiting or CORS. Run it on an
-internal network or behind your own reverse proxy.
-
-### Geocoding and Photon fair use
-
-Address input is forwarded to Photon. The public instance at
-`photon.komoot.io` is provided by Komoot under a
-[fair-use policy](https://photon.komoot.io): it is fine for occasional
-requests, but if you geocode a lot, run your own Photon instance and set
-`PHOTON_URL`. Coordinates input never calls the geocoder.
-
-## Compared to other options
-
-- **Overpass API:** raw OpenStreetMap queries. The public instances are
-  rate-limited and not meant for production use, and you get raw elements
-  without categories, ranking or walking times.
-- **Hosted places APIs** (Google Places, Geoapify and others): more data,
-  some with ratings, but paid beyond a free tier, often with terms on
-  caching and displaying results, and your coordinates leave your network.
-- **openpoiservice:** self-hosted points of interest from OpenStreetMap,
-  but it needs PostGIS and has no presets, ranking or address input.
-- **Walk Score and similar scores:** one proprietary number per location.
-  OpenPropertyLocation returns the places themselves, so you decide how to
-  present them.
 
 ## Licensing and attribution
 

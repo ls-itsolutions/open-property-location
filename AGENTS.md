@@ -370,10 +370,12 @@ opl filter-expressions --routes   # expressions for route and stop_area relation
 Configuration through flags with env fallbacks (`OPL_DATA`, `OPL_ADDR`,
 `PHOTON_URL`). Nothing else.
 
-`opl serve --demo` additionally serves a demo page at `/demo/` (address or
-coordinates in, preset dropdown, results and raw JSON out). It is off by
-default, embedded into the binary, plain HTML/CSS/JS without external
-resources, and only talks to the API of the same server.
+`opl serve --demo` additionally serves a demo page at `/demo/`: an address
+and a preset in, the nearest three places per category with their lines
+out. Keep it minimal. It is off by default, embedded into the binary, plain
+HTML/CSS/JS without external resources, and only talks to the API of the
+same server. The README shows it as an animated GIF (`docs/`, light and
+dark), recorded from the real page with Germany data.
 `opl healthcheck` exists for the Docker healthcheck (no curl in
 distroless).
 
@@ -449,7 +451,7 @@ internal/server/           # HTTP handlers, query, ranking
 internal/geocode/          # Photon client
 internal/demo/             # opt-in demo page (serve --demo)
 scripts/build-data.sh
-docs/                      # README screenshots of the demo page
+docs/                      # README GIFs of the demo page
 Dockerfile
 openapi.yaml               # API reference; TestOpenAPI keeps it in sync
 .github/workflows/ci.yml   # also merges Dependabot patch/minor updates
