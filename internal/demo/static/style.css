@@ -91,6 +91,15 @@ li > div { min-width: 0; }
 .line.tram { background: #c0392b; }
 .line.ferry { background: #0f7f99; }
 
+.departures {
+  padding: 0 .35rem;
+  border: 1px solid var(--muted);
+  border-radius: .25rem;
+  color: var(--muted);
+  font-size: .75rem;
+  white-space: nowrap;
+}
+
 footer { margin-top: 2rem; color: var(--muted); font-size: .85rem; }
 a { color: var(--accent); }
 #status:empty { display: none; }

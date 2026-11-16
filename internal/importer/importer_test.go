@@ -8,8 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ls-itsolutions/open-property-location/internal/categories"
+	"github.com/ls-itsolutions/open-property-location/internal/gtfs"
 	"github.com/ls-itsolutions/open-property-location/internal/outline"
 )
 
@@ -25,7 +27,7 @@ func TestImport(t *testing.T) {
 	defer in.Close()
 
 	out := filepath.Join(t.TempDir(), "places.db")
-	counts, err := Import(cfg, in, nil, out, Meta{Region: "test", DataVersion: "2026-10-26"})
+	counts, err := Import(cfg, in, nil, nil, out, Meta{Region: "test", DataVersion: "2026-10-26"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,6 +143,29 @@ func TestImport(t *testing.T) {
 	if err := db.QueryRow(`SELECT value FROM meta WHERE key = 'data_version'`).Scan(&version); err != nil || version != "2026-10-26" {
 		t.Errorf("data_version = %q, %v", version, err)
 	}
+	var attribution string
+	if err := db.QueryRow(`SELECT value FROM meta WHERE key = 'attribution'`).Scan(&attribution); err != nil || attribution != osmAttribution {
+		t.Errorf("attribution = %q, %v", attribution, err)
+	}
+	var departures int
+	if err := db.QueryRow(`SELECT count(*) FROM places WHERE departures IS NOT NULL`).Scan(&departures); err != nil || departures != 0 {
+		t.Errorf("places with departures = %d, %v; want none without GTFS", departures, err)
+	}
+}
+
+func TestImportRequiresTimetableAttribution(t *testing.T) {
+	cfg, err := categories.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	departures, err := gtfs.Read("../gtfs/testdata/feed", time.Date(2026, 11, 16, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(t.TempDir(), "places.db")
+	if _, err := Import(cfg, strings.NewReader(""), nil, departures, out, Meta{Region: "test", DataVersion: "2026-11-16"}); err == nil {
+		t.Error("no error without timetable attribution")
+	}
 }
 
 func TestImportKeepsExistingFileOnError(t *testing.T) {
@@ -158,7 +183,7 @@ func TestImportKeepsExistingFileOnError(t *testing.T) {
 		`{"type":"Polygon","coordinates":[[[0,0],[200,0],[0,1],[0,0]]]}`,
 	} {
 		bad := `{"type":"Feature","geometry":` + geometry + `,"properties":{"@type":"way","@id":1,"leisure":"park"}}`
-		if _, err := Import(cfg, strings.NewReader(bad), nil, out, Meta{Region: "test", DataVersion: "2026-10-26"}); err == nil {
+		if _, err := Import(cfg, strings.NewReader(bad), nil, nil, out, Meta{Region: "test", DataVersion: "2026-10-26"}); err == nil {
 			t.Fatalf("%s: expected error", geometry)
 		}
 	}

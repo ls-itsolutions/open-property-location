@@ -26,11 +26,16 @@ jobs:
       matrix:
         include:
           # The smoke test location must have a train station with lines
-          # within 500 m.
+          # within 500 m, and departures if the region has a GTFS feed.
+          # Thresholds are about half of the November 2026 builds;
+          # paediatricians are rarely tagged outside Germany, Austria and
+          # Switzerland.
           - name: germany
             title: Germany
             geofabrik: europe/germany
             smoke: 52.5219 13.4132 # Berlin Alexanderplatz
+            gtfs: https://download.gtfs.de/germany/free/latest.zip
+            gtfs_attribution: DELFI e.V. via gtfs.de, CC BY 4.0
           - name: austria
             title: Austria
             geofabrik: europe/austria
@@ -41,8 +46,43 @@ jobs:
             title: Switzerland
             geofabrik: europe/switzerland
             smoke: 47.3779 8.5403 # Zürich HB
+            # One feed per timetable year, see the build step.
+            gtfs: https://data.opentransportdata.swiss/dataset/timetable-{year}-gtfs2020/permalink
+            gtfs_attribution: opentransportdata.swiss
             min_size_mb: 10
             min_per_category: 50
+          - name: netherlands
+            title: Netherlands
+            geofabrik: europe/netherlands
+            smoke: 52.3789 4.9003 # Amsterdam Centraal
+            gtfs: https://gtfs.ovapi.nl/nl/gtfs-nl.zip
+            gtfs_attribution: OVapi (gtfs.ovapi.nl), CC0
+            min_size_mb: 30
+            min_per_category: 2
+          - name: denmark
+            title: Denmark
+            geofabrik: europe/denmark
+            smoke: 55.6727 12.5649 # København H
+            min_size_mb: 8
+            min_per_category: 4
+          - name: italy
+            title: Italy
+            geofabrik: europe/italy
+            smoke: 41.9009 12.5013 # Roma Termini
+            min_size_mb: 60
+            min_per_category: 50
+          - name: spain
+            title: Spain
+            geofabrik: europe/spain
+            smoke: 40.4066 -3.6894 # Madrid Puerta de Atocha
+            min_size_mb: 45
+            min_per_category: 15
+          - name: croatia
+            title: Croatia
+            geofabrik: europe/croatia
+            smoke: 45.8045 15.9787 # Zagreb Glavni kolodvor
+            min_size_mb: 5
+            min_per_category: 4
     env:
       REGION: ${{ matrix.name }}
       TITLE: ${{ matrix.title }}
@@ -58,13 +98,31 @@ jobs:
       - name: Build data
         env:
           GEOFABRIK: ${{ matrix.geofabrik }}
+          GTFS: ${{ matrix.gtfs }}
+          GTFS_ATTRIBUTION: ${{ matrix.gtfs_attribution }}
         run: |
-          scripts/build-data.sh "$GEOFABRIK" out
+          if [[ $GTFS == *'{year}'* ]]; then
+            # The next year's timetable is published about a month before
+            # the change in December; until then use this year's.
+            year=$(date +%Y)
+            for y in $((year + 1)) "$year"; do
+              if curl -sfL -r 0-0 -o /dev/null "${GTFS//\{year\}/$y}"; then
+                GTFS=${GTFS//\{year\}/$y}
+                break
+              fi
+            done
+          fi
+          if [[ -n $GTFS ]]; then
+            scripts/build-data.sh "$GEOFABRIK" out "$GTFS" "$GTFS_ATTRIBUTION"
+          else
+            scripts/build-data.sh "$GEOFABRIK" out
+          fi
           echo "DATA_VERSION=$(cat out/data-version)" >> "$GITHUB_ENV"
           df -h .
       - name: Smoke test
         env:
           SMOKE: ${{ matrix.smoke }}
+          REQUIRE_DEPARTURES: ${{ matrix.gtfs && '1' || '' }}
         run: |
           go build -o opl ./cmd/opl
           read -r lat lon <<< "$SMOKE"

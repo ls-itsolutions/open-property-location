@@ -1,0 +1,4 @@
+route_id,route_short_name,route_type
+R1,23,3
+R2,RE1,106
+R3,Seilbahn,6

@@ -10,14 +10,23 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ls-itsolutions/open-property-location/internal/categories"
 	"github.com/ls-itsolutions/open-property-location/internal/geocode"
+	"github.com/ls-itsolutions/open-property-location/internal/gtfs"
 	"github.com/ls-itsolutions/open-property-location/internal/importer"
 	"github.com/ls-itsolutions/open-property-location/internal/transit"
 )
 
+const testAttribution = "© OpenStreetMap contributors, ODbL; timetables: Test feed"
+
 func newTestHandler(t *testing.T, photon http.HandlerFunc) http.Handler {
+	t.Helper()
+	return New(newTestData(t, photon))
+}
+
+func newTestData(t *testing.T, photon http.HandlerFunc) (*Places, *categories.Config, *geocode.Client) {
 	t.Helper()
 	cats, err := categories.Load()
 	if err != nil {
@@ -37,8 +46,13 @@ func newTestHandler(t *testing.T, photon http.HandlerFunc) http.Handler {
 		t.Fatal(err)
 	}
 	defer in.Close()
+	departures, err := gtfs.Read("../gtfs/testdata/feed", time.Date(2026, 10, 26, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
 	dbPath := filepath.Join(t.TempDir(), "places.db")
-	if _, err := importer.Import(cats, in, lines, dbPath, importer.Meta{Region: "test", DataVersion: "2026-10-26"}); err != nil {
+	meta := importer.Meta{Region: "test", DataVersion: "2026-10-26", TimetableAttribution: "Test feed"}
+	if _, err := importer.Import(cats, in, lines, departures, dbPath, meta); err != nil {
 		t.Fatal(err)
 	}
 	places, err := Open(dbPath)
@@ -56,7 +70,7 @@ func newTestHandler(t *testing.T, photon http.HandlerFunc) http.Handler {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return New(places, cats, geocoder)
+	return places, cats, geocoder
 }
 
 func get(t *testing.T, h http.Handler, target string, wantStatus int, body any) {
@@ -81,7 +95,7 @@ func TestSurroundings(t *testing.T) {
 	var resp surroundingsResponse
 	get(t, h, "/v1/surroundings?lat=53.0&lon=8.8&preset=living", http.StatusOK, &resp)
 
-	if resp.DataVersion != "2026-10-26" || resp.Attribution != attribution {
+	if resp.DataVersion != "2026-10-26" || resp.Attribution != testAttribution {
 		t.Errorf("meta = %q, %q", resp.DataVersion, resp.Attribution)
 	}
 	cats, _ := categories.Load()
@@ -149,6 +163,14 @@ func TestSurroundingsCollapseSameName(t *testing.T) {
 	if want := []transit.Line{{Mode: "tram", Ref: "6"}}; !slices.Equal(rathaus.Lines, want) {
 		t.Errorf("Rathaus lines = %v, want %v", rathaus.Lines, want)
 	}
+	// Two GTFS stops with one departure each between 06:00 and 20:00 are
+	// within 50 m of Markt; none is near Rathaus.
+	if d := markt.DeparturesPerHour; d == nil || *d != 0.1 {
+		t.Errorf("Markt departures = %v, want 0.1", d)
+	}
+	if rathaus.DeparturesPerHour != nil {
+		t.Errorf("Rathaus departures = %v, want null", *rathaus.DeparturesPerHour)
+	}
 	// Supermarkets do not collapse: two shops of a chain are two places.
 	if n := len(resp.Categories[1].Places); n != 2 {
 		t.Errorf("got %d supermarkets, want 2", n)
@@ -164,7 +186,7 @@ func TestSurroundingsNullFields(t *testing.T) {
 	}
 	get(t, h, "/v1/surroundings?lat=53.0&lon=8.8&categories=park", http.StatusOK, &raw)
 	park := raw.Categories[0].Places[0]
-	for _, key := range []string{"name", "openingHours", "website", "wikidata", "lines"} {
+	for _, key := range []string{"name", "openingHours", "website", "wikidata", "lines", "departuresPerHour"} {
 		if v, ok := park[key]; !ok || v != nil {
 			t.Errorf("%s = %v (present %v), want null", key, v, ok)
 		}

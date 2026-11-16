@@ -15,6 +15,10 @@
 #   distanceToEdge     optional; for areas, measure the distance to the
 #                      nearest edge instead of the centroid (0 inside). Only
 #                      worth it for large areas: the geometry is stored.
+#   departures         optional; attach the departures per hour from GTFS
+#                      timetables, if the data build has them: the
+#                      departures of the given modes (OSM route values) at
+#                      all GTFS stops within withinMeters of the place
 #
 # An element that matches several categories belongs to the first one in
 # this file. The osmium filter for the data build is generated from these
@@ -120,6 +124,10 @@ categories:
     requireName: true
     maxDistanceMeters: 1000
     collapseSameName: true
+    # Both directions of a stop are usually within a street's width.
+    departures:
+      modes: [bus, trolleybus, tram]
+      withinMeters: 50
 
   - id: train_station
     match:
@@ -127,6 +135,10 @@ categories:
     requireName: true
     maxDistanceMeters: 10000
     collapseSameName: true
+    # Platforms of large stations are a few hundred meters from the centre.
+    departures:
+      modes: [train, light_rail, subway]
+      withinMeters: 300
 
   - id: ferry_terminal
     match:
@@ -134,6 +146,9 @@ categories:
     requireName: true
     maxDistanceMeters: 10000
     collapseSameName: true
+    departures:
+      modes: [ferry]
+      withinMeters: 200
 
   # Leisure and sights
   - id: attraction

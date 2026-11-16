@@ -5,11 +5,15 @@ info:
   description: |
     Self-hosted service that returns the nearest supermarkets, bakeries,
     bus stops, train stations, schools, beaches and more for a location,
-    grouped by category, with distance, an estimated walking time and the
-    public transport lines serving each stop.
+    grouped by category, with distance, an estimated walking time, the
+    public transport lines serving each stop and how often they depart.
 
-    The data comes from OpenStreetMap (ODbL). Clients must display the
+    The data comes from OpenStreetMap (ODbL), departures from GTFS
+    timetables where the region has an open feed. Clients must display the
     `attribution` returned in every response.
+
+    The same lookups are available to AI assistants through the Model
+    Context Protocol at `POST /mcp` (see the README).
   license:
     name: MIT
     identifier: MIT
@@ -88,6 +92,34 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/CategoriesResponse" }
+  /mcp:
+    post:
+      operationId: mcp
+      summary: Model Context Protocol endpoint (Streamable HTTP)
+      description: |
+        JSON-RPC 2.0 messages of the Model Context Protocol, with the tools
+        `get_surroundings` (the parameters of `/v1/surroundings`) and
+        `list_categories`. Requests get a JSON response, notifications
+        `202`. Requests with an `Origin` header from another host are
+        rejected.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200":
+          description: JSON-RPC response.
+          content:
+            application/json:
+              schema: { type: object }
+        "202":
+          description: Notification accepted.
+        "403":
+          description: Origin of another host.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /health:
     get:
       operationId: getHealth
@@ -164,8 +196,10 @@ components:
           description: Date of the OpenStreetMap extract.
         attribution:
           type: string
-          description: Must be displayed wherever the data is shown.
-          example: © OpenStreetMap contributors, ODbL
+          description: >
+            Must be displayed wherever the data is shown. Names the GTFS
+            feed too when the data has departures.
+          example: "© OpenStreetMap contributors, ODbL; timetables: DELFI e.V. via gtfs.de, CC BY 4.0"
     Location:
       type: object
       required: [lat, lon]
@@ -183,7 +217,7 @@ components:
     Place:
       type: object
       required: [id, name, lat, lon, distanceMeters, walkingMinutes, address,
-        openingHours, website, wikidata, lines, osmUrl]
+        openingHours, website, wikidata, lines, departuresPerHour, osmUrl]
       properties:
         id:
           type: string
@@ -221,6 +255,16 @@ components:
             Public transport lines serving a stop, station or ferry terminal,
             sorted by mode and then by ref.
           items: { $ref: "#/components/schemas/Line" }
+        departuresPerHour:
+          type: [number, "null"]
+          description: >
+            Stops, stations and ferry terminals: average departures per hour
+            on a weekday (a Tuesday) between 06:00 and 20:00, all lines and
+            directions, from the GTFS timetable. Counts the GTFS stops within
+            50 m of a bus or tram stop, 300 m of a station and 200 m of a
+            ferry terminal. null when the region has no timetable data or no
+            departure was found. One decimal; 0.5 is one every two hours.
+          example: 12.5
         osmUrl:
           type: string
           format: uri

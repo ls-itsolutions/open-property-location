@@ -23,6 +23,7 @@ import (
 	"github.com/ls-itsolutions/open-property-location/internal/categories"
 	"github.com/ls-itsolutions/open-property-location/internal/demo"
 	"github.com/ls-itsolutions/open-property-location/internal/geocode"
+	"github.com/ls-itsolutions/open-property-location/internal/gtfs"
 	"github.com/ls-itsolutions/open-property-location/internal/importer"
 	"github.com/ls-itsolutions/open-property-location/internal/server"
 	"github.com/ls-itsolutions/open-property-location/internal/transit"
@@ -42,7 +43,9 @@ const (
 
 const usage = `Usage:
   opl serve  [--data places.db] [--addr :8080] [--demo]
-  opl import --in places.geojsonseq [--routes routes.osm.gz] --out places.db --region <name> --data-version YYYY-MM-DD
+  opl mcp    [--data places.db]   MCP server on stdin/stdout
+  opl import --in places.geojsonseq [--routes routes.osm.gz] [--gtfs gtfs.zip --gtfs-attribution <text>]
+             --out places.db --region <name> --data-version YYYY-MM-DD
   opl filter-expressions [--routes]
   opl healthcheck [--addr :8080]
 
@@ -59,6 +62,8 @@ func main() {
 	switch cmd {
 	case "serve":
 		err = serve(args)
+	case "mcp":
+		err = mcp(args)
 	case "import":
 		err = runImport(args)
 	case "filter-expressions":
@@ -85,6 +90,23 @@ func env(key, fallback string) string {
 	return fallback
 }
 
+// openData loads everything serve and mcp need.
+func openData(data string) (*server.Places, *categories.Config, *geocode.Client, error) {
+	cats, err := categories.Load()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	geocoder, err := geocode.New(env("PHOTON_URL", defaultPhoton))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	places, err := server.Open(data)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return places, cats, geocoder, nil
+}
+
 func serve(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	data := fs.String("data", env("OPL_DATA", defaultData), "path to places.db")
@@ -92,15 +114,7 @@ func serve(args []string) error {
 	withDemo := fs.Bool("demo", false, "also serve a demo page at /demo/")
 	fs.Parse(args)
 
-	cats, err := categories.Load()
-	if err != nil {
-		return err
-	}
-	geocoder, err := geocode.New(env("PHOTON_URL", defaultPhoton))
-	if err != nil {
-		return err
-	}
-	places, err := server.Open(*data)
+	places, cats, geocoder, err := openData(*data)
 	if err != nil {
 		return err
 	}
@@ -142,6 +156,23 @@ func serve(args []string) error {
 	return srv.Shutdown(shutdownCtx)
 }
 
+// mcp serves MCP on stdin/stdout for clients that start the server as a
+// subprocess. Logs go to stderr, as the protocol requires.
+func mcp(args []string) error {
+	fs := flag.NewFlagSet("mcp", flag.ExitOnError)
+	data := fs.String("data", env("OPL_DATA", defaultData), "path to places.db")
+	fs.Parse(args)
+
+	places, cats, geocoder, err := openData(*data)
+	if err != nil {
+		return err
+	}
+	defer places.Close()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return server.ServeMCP(ctx, places, cats, geocoder, os.Stdin, os.Stdout)
+}
+
 // demoURL guesses the browser URL of the demo page. In a container the
 // published port can differ from the one the server listens on.
 func demoURL(addr string) string {
@@ -159,12 +190,17 @@ func runImport(args []string) error {
 	fs := flag.NewFlagSet("import", flag.ExitOnError)
 	in := fs.String("in", "", "GeoJSON sequence from osmium export")
 	routes := fs.String("routes", "", "optional OSM XML (.osm or .osm.gz) with route and stop_area relations, for the lines of stops")
+	gtfsPath := fs.String("gtfs", "", "optional GTFS zip file, for the departures per hour of stops")
+	gtfsAttribution := fs.String("gtfs-attribution", "", "credit for the GTFS feed, added to the attribution of every response")
 	out := fs.String("out", "", "database to create")
 	region := fs.String("region", "", "region name stored in the database, e.g. germany")
 	dataVersion := fs.String("data-version", "", "date of the OSM extract, YYYY-MM-DD")
 	fs.Parse(args)
 	if *in == "" || *out == "" {
 		return errors.New("import: --in and --out are required")
+	}
+	if (*gtfsPath == "") != (*gtfsAttribution == "") {
+		return errors.New("import: --gtfs and --gtfs-attribution go together")
 	}
 
 	cats, err := categories.Load()
@@ -178,13 +214,25 @@ func runImport(args []string) error {
 			return err
 		}
 	}
+	var departures *gtfs.Departures
+	if *gtfsPath != "" {
+		from, err := time.Parse(time.DateOnly, *dataVersion)
+		if err != nil {
+			return fmt.Errorf("import: --data-version must be YYYY-MM-DD: %w", err)
+		}
+		if departures, err = gtfs.Read(*gtfsPath, from); err != nil {
+			return fmt.Errorf("read %s: %w", *gtfsPath, err)
+		}
+		fmt.Printf("departures counted on %s\n", departures.Date.Format(time.DateOnly))
+	}
 	f, err := os.Open(*in)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 
-	counts, err := importer.Import(cats, f, lines, *out, importer.Meta{Region: *region, DataVersion: *dataVersion})
+	meta := importer.Meta{Region: *region, DataVersion: *dataVersion, TimetableAttribution: *gtfsAttribution}
+	counts, err := importer.Import(cats, f, lines, departures, *out, meta)
 	if err != nil {
 		return err
 	}

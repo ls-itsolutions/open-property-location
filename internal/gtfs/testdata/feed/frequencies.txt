@@ -1,0 +1,2 @@
+trip_id,start_time,end_time,headway_secs
+T4,06:00:00,08:00:00,1800

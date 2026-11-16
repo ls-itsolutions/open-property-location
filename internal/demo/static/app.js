@@ -15,6 +15,9 @@ function renderPlace(place) {
   const m = place.distanceMeters;
   const distance = m < 1000 ? `${m} m` : `${(m / 1000).toFixed(1)} km`;
   const lines = (place.lines ?? []).map(({ mode, ref }) => el("span", `line ${mode}`, ref));
+  if (place.departuresPerHour != null) {
+    lines.push(el("span", "departures", `${place.departuresPerHour}/h`));
+  }
   return el("li", "",
     el("div", "", el("div", place.name ? "" : "unnamed", place.name ?? "unnamed"), el("div", "lines", ...lines)),
     el("span", "distance", place.walkingMinutes <= 60 ? `${place.walkingMinutes} min · ${distance}` : distance),
@@ -39,6 +42,8 @@ form.addEventListener("submit", async (event) => {
     const resp = await fetch(url);
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.error ?? `HTTP ${resp.status}`);
+    // The OpenStreetMap part is in the footer already; add the timetable credit.
+    document.getElementById("timetables").textContent = data.attribution.replace(/^[^;]*/, "");
     const found = data.categories.filter((c) => c.places.length > 0);
     results.replaceChildren(...found.map(renderCategory));
     if (found.length === 0) statusLine.textContent = "Nothing nearby.";

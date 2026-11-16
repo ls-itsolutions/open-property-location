@@ -15,8 +15,9 @@ OpenPropertyLocation is a small, self-hostable HTTP service:
 
 For a property it returns the nearest relevant places grouped by category
 (supermarket, bakery, bus stop, train station, school, beach, …) with
-distance, an estimated walking time and the public transport lines serving
-each stop.
+distance, an estimated walking time, the public transport lines serving
+each stop and, where an open GTFS timetable exists, the departures per hour.
+The same lookups are available to AI assistants as an MCP server.
 
 It is built on OpenStreetMap data and published as open source (MIT).
 
@@ -28,10 +29,11 @@ Use cases:
   information next to the listing's free-text "Lage" description
   (schools, kindergartens, doctors, supermarkets, public transport).
 
-The service delivers **facts about the surroundings, not quality
-judgements**. OpenStreetMap has no ratings. Curated tips ("our favourite
-restaurant") and the free-text location description stay in the
-consuming application.
+Ratings and reviews are welcome if a free, openly licensed source with
+useful coverage exists. As of November 2026 there is none: OpenStreetMap
+has no ratings, and the open review project Mangrove has only a few dozen
+reviews per month worldwide. Curated tips ("our favourite restaurant") and
+the free-text location description stay in the consuming application.
 
 The service must not contain anything specific to one consumer: no
 tenants, no auth, no customer logic.
@@ -56,10 +58,14 @@ structured data (Rightmove: schools and stations; Zillow/Redfin: nearby
 schools, Walk Score; ImmoScout24 AT: "Infrastruktur / Entfernungen" with
 distance bands). OpenPropertyLocation is that structured part.
 
-What makes it different: **one `docker run`, prebuilt data for Germany,
-Austria and Switzerland, curated categories, presets for "stay" and
-"living", grouped results, walking minutes, lines at stops, distance to the
-edge of beaches and parks, MIT, tiny resource footprint.**
+What makes it different: **one `docker run`, prebuilt data for eight
+countries, curated categories, presets for "stay" and "living", grouped
+results, walking minutes, lines and departures per hour at stops, distance
+to the edge of beaches and parks, an MCP server for AI assistants, MIT,
+tiny resource footprint.**
+
+Other OpenStreetMap MCP servers (November 2026) query Overpass and
+Nominatim live and have no categories, ranking or timetables.
 
 ---
 
@@ -67,23 +73,31 @@ edge of beaches and parks, MIT, tiny resource footprint.**
 
 In scope:
 
-- Regions: **Germany, Austria and Switzerland** are built and published
-  (the build script takes the Geofabrik region as a parameter, so others
-  are possible).
+- Regions: **Germany, Austria, Switzerland, the Netherlands, Denmark,
+  Italy, Spain and Croatia** are built and published (the build script
+  takes the Geofabrik region as a parameter, so others are possible).
 - `GET /v1/surroundings`, `GET /v1/categories`, `GET /health`.
+- MCP server with the tools `get_surroundings` and `list_categories`, over
+  stdio (`opl mcp`) and Streamable HTTP (`POST /mcp`).
+- Departures per hour at stops from open GTFS feeds: Germany (gtfs.de),
+  Switzerland (opentransportdata.swiss), Netherlands (OVapi). Austria and
+  Denmark need a registration, Italy, Spain and Croatia have no national
+  feed.
 - Input as coordinates, or as an address geocoded via Photon.
 - Weekly data build in GitHub Actions, published as a Docker image.
 
 Not in scope (do not build):
 
-- Ratings, reviews, photos.
+- Ratings and reviews without a free source (see above), photos.
 - Real routing / isochrones (walking time is an estimate, see below).
 - Auth, API keys, rate limiting, CORS.
 - A publicly hosted instance.
 - Overture / Foursquare data.
 - Translated category labels (clients localize category ids).
-- Countries other than Germany, Austria and Switzerland as published builds.
-- Timetables, departures or line colours (only line refs from OSM).
+- Published builds of countries other than the eight above.
+- Timetables, live departures or line colours (only line refs from OSM and
+  departures per hour from GTFS).
+- MCP resources, prompts, sessions or server-sent events (tools only).
 
 ---
 
@@ -128,9 +142,13 @@ places.geojsonseq             routes.osm.gz
 places.db (SQLite + R*Tree + meta)
 ```
 
-- `scripts/build-data.sh <geofabrik-path> <out-dir>`, for example
-  `europe/germany` or `europe/germany/bremen` for a small test region. CI
-  and local builds both use this script.
+Optionally `opl import --gtfs` also reads a GTFS zip and stores the
+departures per hour at stops (see Departures).
+
+- `scripts/build-data.sh <geofabrik-path> <out-dir> [<gtfs-url>
+  <gtfs-attribution>]`, for example `europe/germany` or
+  `europe/germany/bremen` for a small test region. CI and local builds both
+  use this script.
 - The osmium filter expressions are **generated from `categories.yaml`**
   (`opl filter-expressions`), so the category definitions live in exactly
   one place. The route filter (`opl filter-expressions --routes`) comes from
@@ -149,7 +167,26 @@ places.db (SQLite + R*Tree + meta)
 - Drop elements with `access=private` or `access=no`.
 - If an element matches several categories, the first matching category in
   `categories.yaml` order wins.
-- `meta` table: `data_version` (OSM extract date), `region`, `source`.
+- `meta` table: `data_version` (OSM extract date), `region`, `source`,
+  `attribution` (returned by the API, includes the GTFS credit) and
+  `departures_date` (the day departures were counted on, with GTFS only).
+
+## Departures
+
+- Count, per GTFS stop and mode, the departures on a Tuesday between
+  06:00 and 20:00 and divide by 14: the average per hour. The Tuesday is
+  the one with the most active services within 35 days after the OSM
+  extract date (or the feed start, if later), so holidays are avoided.
+- A departure is a stop time with pickup, except the last stop of a trip.
+  `frequencies.txt` trips count every start of the frequency. Stop times
+  without a time are not counted.
+- GTFS route types (basic and extended) map to the OSM route modes;
+  others (cable cars, taxis, …) are ignored.
+- A place of a category with `departures` gets the sum over all GTFS stops
+  within `withinMeters` of the given modes, rounded to one decimal, or
+  NULL when none is found. Collapsed places keep the highest value.
+- The GTFS feed and the credit it requires are build parameters. Only
+  openly licensed feeds without registration are used for published builds.
 
 The build must not run on the server that serves the API. It runs in CI or
 on a developer machine.
@@ -170,7 +207,8 @@ CREATE TABLE places (
   importance  REAL NOT NULL,       -- 0..1
   tags        TEXT NOT NULL,       -- JSON, only the tags the API returns
   lines       TEXT,                -- JSON [{"mode","ref"}], sorted
-  outline     BLOB                 -- distanceToEdge areas only
+  outline     BLOB,                -- distanceToEdge areas only
+  departures  REAL                 -- per hour, categories with departures only
 );
 
 -- The category is a third dimension (min_cat = max_cat = categories.key),
@@ -186,8 +224,9 @@ CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 
 The server reads the `categories` table at startup. A category that is in
 `categories.yaml` but not in the db (data built before it was added)
-returns no places. A db without the `lines` and `outline` columns (built by
-1.0) is rejected at startup with a message to rebuild it.
+returns no places. A db without the `lines`, `outline` and `departures`
+columns or the `attribution` meta entry (built by an older version) is
+rejected at startup with a message to rebuild it.
 
 The importer creates the db from scratch every time (no incremental
 updates). It writes into a temp file and renames it at the end.
@@ -212,6 +251,10 @@ Each category has:
   The lines of the collapsed places are merged.
 - `distanceToEdge` (optional): measure the distance to the nearest edge of
   areas instead of the centroid. Set for `beach`, `swimming` and `park`.
+- `departures` (optional): `modes` and `withinMeters` for the departures
+  per hour. Set for `bus_tram_stop` (bus, trolleybus, tram; 50 m),
+  `train_station` (train, light_rail, subway; 300 m) and `ferry_terminal`
+  (ferry; 200 m).
 
 Categories (file order, which decides when an element matches several):
 
@@ -320,6 +363,7 @@ Response `200`:
           "website": "https://example.org",
           "wikidata": null,
           "lines": null,
+          "departuresPerHour": null,
           "osmUrl": "https://www.openstreetmap.org/node/123456"
         }
       ]
@@ -334,6 +378,9 @@ Response `200`:
   clients can rely on the preset order).
 - Optional fields are `null` when the tag is missing.
 - `lines`: `[{"mode": "bus", "ref": "23"}, …]` or `null`.
+- `departuresPerHour`: number with one decimal or `null`.
+- `attribution` comes from the `meta` table: the OSM credit, plus
+  `; timetables: <credit>` with GTFS.
 - `distanceMeters` is to the nearest edge for `distanceToEdge` categories.
 - Errors: `400` for invalid parameters, `404` when the address was not
   found, `502` when the geocoder fails. Body: `{ "error": "<message>" }`.
@@ -341,6 +388,22 @@ Response `200`:
 ## `GET /v1/categories`
 
 Returns all categories (id, maxDistanceMeters) and presets.
+
+## MCP
+
+- JSON-RPC 2.0, tools only: `get_surroundings` (the query parameters of
+  `/v1/surroundings` as arguments, `categories` as an array; returns the
+  same JSON as text content and `structuredContent`) and
+  `list_categories`. Invalid arguments are tool errors (`isError`), so the
+  model sees the message.
+- Protocol versions 2025-11-25, 2025-06-18, 2025-03-26 and 2024-11-05; the
+  server answers with the client's version if supported, else the newest.
+- stdio: `opl mcp`, newline-delimited messages, logs on stderr.
+- HTTP: `POST /mcp` returns one JSON response per request and `202` for
+  notifications; `GET /mcp` is `405`. Requests with an `Origin` header
+  whose host differs from `Host` get `403` (DNS rebinding).
+- Hand-written on `net/http` and `encoding/json`: the subset is small, so
+  no SDK dependency.
 
 ## `GET /health`
 
@@ -362,7 +425,8 @@ One binary, `opl`:
 
 ```
 opl serve  --data /data/places.db --addr :8080
-opl import --in places.geojsonseq --routes routes.osm.gz --out places.db --region germany --data-version 2026-10-26
+opl mcp    --data /data/places.db  # MCP on stdin/stdout
+opl import --in places.geojsonseq --routes routes.osm.gz [--gtfs gtfs.zip --gtfs-attribution "<credit>"] --out places.db --region germany --data-version 2026-10-26
 opl filter-expressions            # osmium tags-filter expressions from categories.yaml
 opl filter-expressions --routes   # expressions for route and stop_area relations
 ```
@@ -394,7 +458,8 @@ Images (GHCR, public):
 
 - `ghcr.io/ls-itsolutions/open-property-location:<version>`: binary only (from tags)
 - `ghcr.io/ls-itsolutions/open-property-location:<region>` (`germany`,
-  `austria`, `switzerland`): binary + latest data
+  `austria`, `switzerland`, `netherlands`, `denmark`, `italy`, `spain`,
+  `croatia`): binary + latest data
 - `ghcr.io/ls-itsolutions/open-property-location:<region>-YYYY-MM-DD`: pinned
   data version
 
@@ -419,16 +484,15 @@ Target runtime footprint: **≤ 128 MB RAM**, so it runs with
   script → import → start server → smoke test query (the train station
   must have lines)
 
-`data.yml` (weekly cron + `workflow_dispatch`), one matrix job per region
-(germany, austria, switzerland):
+`data.yml` (weekly cron + `workflow_dispatch`), one matrix job per region,
+with the GTFS feed and its credit where the region has one:
 
 1. Install osmium-tool (apt).
 2. `scripts/build-data.sh europe/<region> out/`.
-3. Smoke test against the new db: a query at a central station (Berlin
-   Alexanderplatz 52.5219, 13.4132; Wien Hauptbahnhof 48.1851, 16.3777;
-   Zürich HB 47.3779, 8.5403) must return a `train_station` with lines
-   within 500 m. Also check the `places.db` size and the row count per
-   category (thresholds per region), and fail on implausible values.
+3. Smoke test against the new db: a query at a central station must
+   return a `train_station` with lines within 500 m, and with departures
+   for regions with GTFS. Also check the `places.db` size and the row count
+   per category (thresholds per region), and fail on implausible values.
 4. Build and push the `<region>` image only if step 3 passes.
 5. Upload `places.db` to a rolling GitHub release `data-<region>`
    (replace the asset).
@@ -447,7 +511,8 @@ internal/categories/       # categories.yaml (embedded), parsing, matching
 internal/importer/         # geojsonseq → places.db
 internal/outline/          # compact storage of area outlines
 internal/transit/          # lines of stops from route and stop_area relations
-internal/server/           # HTTP handlers, query, ranking
+internal/gtfs/             # departures per hour of stops from a GTFS feed
+internal/server/           # HTTP handlers, MCP (mcp.go), query, ranking
 internal/geocode/          # Photon client
 internal/demo/             # opt-in demo page (serve --demo)
 scripts/build-data.sh
@@ -477,13 +542,17 @@ Split packages only where it helps readability. Fewer is fine.
   asset include `LICENSE-DATA`.
 - Every API response contains `attribution`. The README states that
   clients must display it.
+- Timetables: each GTFS feed under its own license (gtfs.de CC BY 4.0,
+  opentransportdata.swiss terms of use, OVapi CC0). The credit is part of
+  `attribution` and listed in `LICENSE-DATA`.
 - Do not mix in Overture or Foursquare data in V1.
 
 ---
 
 # README must cover
 
-- What it does and does not do (surroundings, not reviews).
+- What it does and does not do (no reviews without a free source).
+- MCP setup for Claude Code, Claude Desktop and other clients, near the top.
 - Quick start with `docker run`.
 - API reference with an example.
 - Categories and presets, and how to customize them (fork, edit
@@ -553,5 +622,20 @@ and report instead of silently working around it.
    larger (Bremen 1.79 → 2.15 MB), so Germany should land around 350 MB.
    `routes.osm.gz` is about 5 % of the `.osm.pbf`. Lines are found for 96 %
    of the bus and tram stops in Bremen and 48 % in Mecklenburg-Vorpommern.
-   The Germany, Austria and Switzerland builds have not run yet; check
-   their size and duration after the first data workflow run.
+   First data workflow runs (November 2026): Germany 324 MB in 11 minutes,
+   Austria 43 MB in 13 minutes, Switzerland 34 MB in 5 minutes.
+4. **Browser-only variant** (idea: query `places.db` from a static host in
+   the browser, no server; checked November 2026, not built): GitHub
+   release assets send no CORS headers, sql.js-httpvfs (last release 2022)
+   has no R\*Tree, sqlite-wasm-http (2023) is experimental, GitHub Pages
+   sites are limited to 1 GB. It would need its own static format, a
+   JavaScript port of the ranking and a host; decide before building it.
+5. **Departures and new regions** (November 2026, local builds in the CI
+   image): share of bus and tram stops / train stations with departures:
+   Bremen 95 % / 81 %, Switzerland 92 % / 87 %, Netherlands 90 % / 84 %.
+   Counting takes about 30 s for the German feed (2.1 GB stop_times, 0.7
+   GB RAM) and the Swiss feed (3.7 GB, 2.4 GB RAM). Sizes and build times:
+   Switzerland 35 MB / 4 min, Netherlands 66 MB / 6 min, Denmark 18 MB /
+   2 min, Croatia 10 MB / 1 min, Italy 129 MB / 9 min, Spain 91 MB / 9 min.
+   All smoke-test stations have lines. Paediatricians are rarely tagged
+   outside Germany, Austria and Switzerland (Netherlands 5, Croatia 9).

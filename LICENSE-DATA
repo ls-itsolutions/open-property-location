@@ -16,4 +16,17 @@ If you display data from this database, you must attribute it, for example
 with "© OpenStreetMap contributors, ODbL" and a link to
 https://www.openstreetmap.org/copyright.
 
+Timetables
+
+For some regions the departures per hour of stops are counted from an open
+GTFS timetable feed. The database then also credits that feed in the meta
+table (key "attribution"), and every API response includes it:
+
+- germany: DELFI e.V. via gtfs.de, Creative Commons Attribution 4.0
+  https://gtfs.de, https://creativecommons.org/licenses/by/4.0/
+- switzerland: opentransportdata.swiss, terms of use require naming the
+  source, https://opentransportdata.swiss/en/terms-of-use/
+- netherlands: OVapi (gtfs.ovapi.nl), CC0 1.0
+  https://creativecommons.org/publicdomain/zero/1.0/
+
 The program code is licensed separately under the MIT License (see LICENSE).

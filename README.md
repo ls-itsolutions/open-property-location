@@ -4,8 +4,9 @@
 
 **What's around this address?**<br>
 Send an address, get the nearest supermarkets, bakeries, schools, stops and
-beaches with walking times and transit lines. Self-hosted, built on
-OpenStreetMap, one `docker run`.
+beaches with walking times, transit lines and how often they run. For your
+app or your AI assistant (MCP). Self-hosted, built on OpenStreetMap, one
+`docker run`.
 
 [![CI](https://github.com/ls-itsolutions/open-property-location/actions/workflows/ci.yml/badge.svg)](https://github.com/ls-itsolutions/open-property-location/actions/workflows/ci.yml)
 [![Data](https://github.com/ls-itsolutions/open-property-location/actions/workflows/data.yml/badge.svg)](https://github.com/ls-itsolutions/open-property-location/actions/workflows/data.yml)
@@ -24,7 +25,9 @@ OpenStreetMap, one `docker run`.
 docker run -p 8080:8080 ghcr.io/ls-itsolutions/open-property-location:germany serve --demo
 ```
 
-Open <http://localhost:8080/demo/> for the page above, or ask the API:
+Germany, Austria, Switzerland, the Netherlands, Denmark, Italy, Spain and
+Croatia each have their own image, see [Regions](#regions). Open
+<http://localhost:8080/demo/> for the page above, or ask the API:
 
 ```sh
 curl -G http://localhost:8080/v1/surroundings \
@@ -50,9 +53,47 @@ curl -G http://localhost:8080/v1/surroundings \
     }
   ],
   "dataVersion": "2026-10-27",
-  "attribution": "© OpenStreetMap contributors, ODbL"
+  "attribution": "© OpenStreetMap contributors, ODbL; timetables: DELFI e.V. via gtfs.de, CC BY 4.0"
 }
 ```
+
+## Use it from an AI assistant (MCP)
+
+OpenPropertyLocation is also a [Model Context Protocol](https://modelcontextprotocol.io)
+server. Claude, Cursor, VS Code and other MCP clients can then answer
+questions like *"What's within walking distance of Am Strom 59 in Rostock,
+and how often does the train go?"* or write the location section of a
+listing from real data.
+
+Claude Code:
+
+```sh
+claude mcp add surroundings -- docker run -i --rm ghcr.io/ls-itsolutions/open-property-location:germany mcp
+```
+
+Claude Desktop, Cursor, VS Code and other clients with a JSON config:
+
+```json
+{
+  "mcpServers": {
+    "surroundings": {
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "ghcr.io/ls-itsolutions/open-property-location:germany", "mcp"]
+    }
+  }
+}
+```
+
+A running server also speaks MCP over HTTP at `/mcp` (Streamable HTTP):
+
+```sh
+claude mcp add --transport http surroundings http://localhost:8080/mcp
+```
+
+Two tools: `get_surroundings` takes the same parameters as
+[`/v1/surroundings`](#get-v1surroundings) and returns the same JSON,
+`list_categories` lists categories and presets. Both are read-only. Use
+another image tag, such as `austria`, for another region.
 
 ## Use it in your app
 
@@ -82,20 +123,27 @@ result and show the `attribution` next to it.
 
 ## Why
 
-- **One container, data included.** Germany, Austria and Switzerland,
-  rebuilt weekly from OpenStreetMap. No API key, no database server, under
-  128 MB of RAM.
+- **One container, data included.** Eight countries, rebuilt weekly from
+  OpenStreetMap. No API key, no database server, under 128 MB of RAM.
 - **Ready to display.** 26 categories, grouped and ranked, with walking
   minutes, the bus, tram and train lines at each stop, and the distance to
   the edge of beaches and parks.
+- **How good is the bus?** In Germany, Switzerland and the Netherlands each
+  stop and station also says how many departures it has per hour, from the
+  official open timetables. "Bus every 10 minutes" and "twice a day" both
+  look like a bus stop on a map.
+- **Made for AI assistants too.** The same data as an [MCP](#use-it-from-an-ai-assistant-mcp)
+  server, so an assistant can describe a location without guessing.
 - **Address or coordinates.** Addresses are geocoded with
   [Photon](https://photon.komoot.io); stored coordinates need no geocoder,
   so nothing leaves your network.
 - **Open.** MIT-licensed code, ODbL data in a single SQLite file.
 
-**What it does not do:** OpenStreetMap has no ratings, so this service
-returns facts about the surroundings, not quality judgements. There are no
-reviews, photos, opening-hours evaluation, isochrones or real routing.
+**What it does not do:** ratings and reviews. OpenStreetMap has none, and
+there is no free source with enough coverage to add them (the open review
+project [Mangrove](https://mangrove.reviews) has only a few reviews so far).
+There are also no photos, opening-hours evaluation, isochrones or real
+routing.
 
 ## Compared to other options
 
@@ -110,6 +158,9 @@ reviews, photos, opening-hours evaluation, isochrones or real routing.
 - **Walk Score and similar scores:** one proprietary number per location.
   OpenPropertyLocation returns the places themselves, so you decide how to
   present them.
+- **Other OpenStreetMap MCP servers:** query the public Overpass and
+  Nominatim APIs live, with their rate limits and without categories,
+  ranking or timetables.
 
 ## API
 
@@ -157,6 +208,7 @@ curl 'http://localhost:8080/v1/surroundings?lat=54.1776&lon=12.0838&categories=b
           "website": "https://example.org",
           "wikidata": null,
           "lines": null,
+          "departuresPerHour": null,
           "osmUrl": "https://www.openstreetmap.org/node/123456"
         }
       ]
@@ -170,7 +222,8 @@ curl 'http://localhost:8080/v1/surroundings?lat=54.1776&lon=12.0838&categories=b
 - Categories are returned in the requested order (for presets, the preset
   order). Categories without results have an empty `places` array.
 - Optional fields (`name`, address parts, `openingHours`, `website`,
-  `wikidata`, `lines`) are `null` when the OSM tag is missing. `website` is always an
+  `wikidata`, `lines`, `departuresPerHour`) are `null` when the data is
+  missing. `website` is always an
   `http` or `https` URL. `openingHours` is the raw
   [OSM opening_hours](https://wiki.openstreetmap.org/wiki/Key:opening_hours)
   value.
@@ -191,10 +244,22 @@ curl 'http://localhost:8080/v1/surroundings?lat=54.1776&lon=12.0838&categories=b
   this is depends on the region: in cities almost every stop has its lines,
   in rural areas often only half of them. When stops with the same name are
   returned once, their lines are merged.
+- `departuresPerHour` says how often public transport leaves a stop,
+  station or ferry terminal: the average per hour on a weekday (a Tuesday a
+  few weeks after the data build) between 06:00 and 20:00, all lines and
+  directions together, with one decimal (`0.5` is one every two hours). It
+  is counted from the region's GTFS timetable at the timetable stops within
+  50 m of a bus or tram stop, 300 m of a station and 200 m of a ferry
+  terminal, and is `null` where the region has no open timetable or none of
+  its stops is nearby. About 90 % of the bus and tram stops have it in
+  Bremen, Switzerland and the Netherlands; Bremen Hauptbahnhof has 20.4
+  trains per hour.
 - `walkingMinutes` is an **estimate**, not a route:
   `ceil(distanceMeters × 1.3 / 80)`. The factor 1.3 accounts for detours,
   and 80 m/min is about 4.8 km/h.
 - `dataVersion` is the date of the OpenStreetMap extract.
+- `attribution` credits the data sources and must be shown with the data.
+  It also names the timetable feed where departures are included.
 - Errors return `{ "error": "<message>" }` with `400` for invalid
   parameters, `404` when the address was not found and `502` when the
   geocoder failed.
@@ -210,6 +275,11 @@ distance.
 ### `GET /v1/categories`
 
 Lists all categories with their search radius, and the presets.
+
+### `POST /mcp`
+
+The [MCP](#use-it-from-an-ai-assistant-mcp) endpoint. Requests from a web
+page of another host (an `Origin` header that does not match) are rejected.
 
 ### `GET /health`
 
@@ -279,20 +349,34 @@ All of this is defined in
 which is embedded into the binary and used both for building the data and
 for serving. To change categories, radii or presets, fork the repository,
 edit the file, and rebuild the binary and the data (see below). Changes to
-`match` and `distanceToEdge` only take effect after the data is rebuilt.
+`match`, `distanceToEdge` and `departures` only take effect after the data
+is rebuilt.
 
 ## Running it
 
+### Regions
+
+| Region | Image tag | Departures per hour from |
+|---|---|---|
+| Germany | `germany` | [gtfs.de](https://gtfs.de) (DELFI e.V., CC BY 4.0) |
+| Austria | `austria` | — (the national feed needs a registration) |
+| Switzerland | `switzerland` | [opentransportdata.swiss](https://opentransportdata.swiss) |
+| Netherlands | `netherlands` | [OVapi](https://gtfs.ovapi.nl) (CC0) |
+| Denmark | `denmark` | — (the national feed needs an account) |
+| Italy | `italy` | — (no national feed) |
+| Spain | `spain` | — (no national feed) |
+| Croatia | `croatia` | — (no national feed) |
+
 | Image tag | Contents |
 |---|---|
-| `germany`, `austria`, `switzerland` | binary + latest data of the country, rebuilt weekly |
-| `germany-YYYY-MM-DD` (and so on) | binary + data of that OSM extract date |
+| `<region>` | binary + latest data of the region, rebuilt weekly |
+| `<region>-YYYY-MM-DD` | binary + data of that OSM extract date |
 | `<version>`, e.g. `1.1.0` | binary only; mount your own `places.db` at `/data/places.db` |
 
 The images need well under 128 MB of RAM and run as a non-root user on
 `linux/amd64` and `linux/arm64`. Without `serve --demo` they serve only the
-API. The databases are also attached to the GitHub releases `data-germany`,
-`data-austria` and `data-switzerland`.
+API and `/mcp`. The databases are also attached to the GitHub releases
+`data-<region>`, such as `data-germany`.
 
 ### Configuration
 
@@ -301,6 +385,7 @@ API. The databases are also attached to the GitHub releases `data-germany`,
 | `serve --data` | `OPL_DATA` | `places.db` (`/data/places.db` in the image) |
 | `serve --addr` | `OPL_ADDR` | `:8080` |
 | `serve --demo` | | off; serves the [demo page](#try-it) at `/demo/` |
+| `mcp --data` | `OPL_DATA` | MCP on stdin/stdout instead of HTTP |
 | | `PHOTON_URL` | `https://photon.komoot.io` |
 
 The service has no authentication, rate limiting or CORS. Run it on an
@@ -324,14 +409,23 @@ or `brew install osmium-tool`).
 ```sh
 scripts/build-data.sh europe/germany/bremen out   # small region for testing
 scripts/build-data.sh europe/austria out          # any Geofabrik path works
+
+# with departures from a GTFS feed: URL and the credit for the attribution
+scripts/build-data.sh europe/germany/bremen out \
+  https://download.gtfs.de/germany/free/latest.zip "DELFI e.V. via gtfs.de, CC BY 4.0"
 ```
 
 The script downloads the extract, keeps only the tags used in
 `categories.yaml` (`opl filter-expressions`) and the public transport route
 relations (`opl filter-expressions --routes`), assembles geometries with
-`osmium export` and imports both with `opl import`. The result is
-`out/places.db`. Germany takes a while and needs about 10 GB of free disk
-space; Bremen takes under a minute.
+`osmium export` and imports both with `opl import`. With a GTFS feed it
+counts the departures of every timetable stop and attaches them to the
+stops nearby. The result is `out/places.db`. Germany takes a while and
+needs about 10 GB of free disk space; Bremen takes under a minute.
+
+Any GTFS feed works, also one of a single transport association: stops
+outside the feed just have no departures. Check its license and pass the
+credit it requires.
 
 Run it with your own data:
 
@@ -355,8 +449,11 @@ docker build --target with-data --build-context data=out -t my-surroundings .
   [Open Database License (ODbL) 1.0](https://opendatacommons.org/licenses/odbl/1-0/).
   `places.db` is a derivative database and is distributed under the ODbL
   as well; see [LICENSE-DATA](LICENSE-DATA).
+- Departures come from the open timetables listed under
+  [Regions](#regions), under their licenses; see LICENSE-DATA.
 - **Clients must display the attribution** returned in every response
-  (`© OpenStreetMap contributors, ODbL`), ideally linking to
+  (`© OpenStreetMap contributors, ODbL`, plus the timetable credit where
+  departures are included), ideally linking to
   <https://www.openstreetmap.org/copyright>, wherever they show the data.
 
 ## Development
@@ -367,11 +464,12 @@ go run ./cmd/opl --help
 ```
 
 The CI workflow builds Bremen on every push and runs a smoke test against
-it. The data workflow builds Germany, Austria and Switzerland weekly, checks
-each (Berlin Alexanderplatz, Wien Hauptbahnhof and Zürich HB must have a
-train station with lines within 500 m, plus size and per-category counts)
-and only then publishes the image and the `data-<country>` release asset.
-If it fails, it opens an issue and closes it once a build passes again.
+it. The data workflow builds every region weekly, checks each (the main
+station of the capital must be a train station with lines within 500 m,
+with departures where the region has a timetable, plus size and
+per-category counts) and only then publishes the image and the
+`data-<region>` release asset. If it fails, it opens an issue and closes it
+once a build passes again.
 
 Dependabot updates are merged automatically when all checks pass, except
 major versions. Once a month the release workflow drafts the next release

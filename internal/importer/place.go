@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/ls-itsolutions/open-property-location/internal/categories"
+	"github.com/ls-itsolutions/open-property-location/internal/gtfs"
 	"github.com/ls-itsolutions/open-property-location/internal/outline"
 	"github.com/ls-itsolutions/open-property-location/internal/transit"
 )
@@ -20,6 +21,10 @@ const (
 	importanceHours      = 0.1
 	importanceAttraction = 0.2
 	maxImportance        = 1.0
+
+	// Departures per hour are rounded to one decimal: 0.5 is a bus every
+	// two hours.
+	departuresPrecision = 10
 )
 
 // apiTags are copied to the tags column as-is when present. website and
@@ -42,6 +47,7 @@ type place struct {
 	importance float64
 	tags       map[string]string
 	lines      []transit.Line
+	departures *float64
 
 	minLat, maxLat, minLon, maxLon float64
 	outline                        []byte // only for areas of distanceToEdge categories
@@ -49,7 +55,7 @@ type place struct {
 
 // toPlace maps a feature to a place. It reports false for features that do
 // not belong to any category or are filtered out.
-func toPlace(cfg *categories.Config, lines *transit.Lines, f feature) (place, bool, error) {
+func toPlace(cfg *categories.Config, lines *transit.Lines, departures *gtfs.Departures, f feature) (place, bool, error) {
 	tags := make(map[string]string, len(f.Properties))
 	for k, v := range f.Properties {
 		if s, ok := v.(string); ok && !strings.HasPrefix(k, "@") {
@@ -87,6 +93,12 @@ func toPlace(cfg *categories.Config, lines *transit.Lines, f feature) (place, bo
 		lines:      lines.For(osmType, osmID),
 	}
 	p.lat, p.lon = s.representativePoint()
+	if len(cat.DepartureModes) > 0 {
+		if n, ok := departures.PerHour(p.lat, p.lon, float64(cat.DeparturesWithinMeters), cat.DepartureModes); ok {
+			n = math.Round(n*departuresPrecision) / departuresPrecision
+			p.departures = &n
+		}
+	}
 	if cat.DistanceToEdge && s.polygons != nil {
 		p.minLat, p.maxLat, p.minLon, p.maxLon = s.bounds()
 		p.outline = outline.Encode(s.rings())

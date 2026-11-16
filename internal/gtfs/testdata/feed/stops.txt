@@ -1,0 +1,6 @@
+﻿stop_id,stop_name,stop_lat,stop_lon
+A,Markt,53.0,8.8
+B,Markt,53.0,8.8003
+C,Ende,53.01,8.8
+S1,Bahnhof,53.0,8.8
+S2,Ziel,53.1,8.8

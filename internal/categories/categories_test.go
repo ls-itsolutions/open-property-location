@@ -28,6 +28,9 @@ func TestLoadEmbedded(t *testing.T) {
 	if cat, ok := cfg.Get("supermarket"); !ok || cat.DistanceToEdge {
 		t.Error("supermarket should measure the distance to its centroid")
 	}
+	if cat, ok := cfg.Get("train_station"); !ok || !slices.Contains(cat.DepartureModes, "train") || cat.DeparturesWithinMeters <= 0 {
+		t.Errorf("train_station departures = %v within %d m", cat.DepartureModes, cat.DeparturesWithinMeters)
+	}
 }
 
 func TestMatch(t *testing.T) {
@@ -106,6 +109,9 @@ func TestParseRejectsInvalid(t *testing.T) {
 		"duplicate preset":  "categories:" + valid + "presets:\n  p: [bar, bar]\n",
 		"empty preset":      "categories:" + valid + "presets:\n  p: []\n",
 		"no categories":     "categories: []\n",
+		"departures mode":   "categories:" + valid + "    departures: {modes: [rocket], withinMeters: 50}\n",
+		"departures radius": "categories:" + valid + "    departures: {modes: [bus]}\n",
+		"departures empty":  "categories:" + valid + "    departures: {modes: [], withinMeters: 50}\n",
 	}
 	for name, input := range tests {
 		if _, err := Parse([]byte(input)); err == nil {

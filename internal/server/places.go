@@ -27,6 +27,7 @@ const maxConnections = 4
 type Places struct {
 	db           *sql.DB
 	dataVersion  string
+	attribution  string
 	categoryKeys map[string]int
 }
 
@@ -61,7 +62,11 @@ func (p *Places) readMeta() error {
 	if err := p.db.QueryRow(`SELECT value FROM meta WHERE key = 'data_version'`).Scan(&p.dataVersion); err != nil {
 		return err
 	}
-	if _, err := p.db.Exec(`SELECT lines, outline FROM places LIMIT 0`); err != nil {
+	_, err := p.db.Exec(`SELECT lines, outline, departures FROM places LIMIT 0`)
+	if err == nil {
+		err = p.db.QueryRow(`SELECT value FROM meta WHERE key = 'attribution'`).Scan(&p.attribution)
+	}
+	if err != nil {
 		return fmt.Errorf("built by an older version of opl, rebuild it: %w", err)
 	}
 	rows, err := p.db.Query(`SELECT key, id FROM categories`)
@@ -85,6 +90,9 @@ func (p *Places) Close() error { return p.db.Close() }
 
 func (p *Places) DataVersion() string { return p.dataVersion }
 
+// Attribution credits the data sources; clients must display it.
+func (p *Places) Attribution() string { return p.attribution }
+
 // Ping checks that the database is readable.
 func (p *Places) Ping(ctx context.Context) error {
 	var one int
@@ -106,7 +114,9 @@ type Place struct {
 	Website        *string        `json:"website"`
 	Wikidata       *string        `json:"wikidata"`
 	Lines          []transit.Line `json:"lines"`
-	OSMURL         string         `json:"osmUrl"`
+	// DeparturesPerHour is the weekday average between 06:00 and 20:00.
+	DeparturesPerHour *float64 `json:"departuresPerHour"`
+	OSMURL            string   `json:"osmUrl"`
 }
 
 type Address struct {
@@ -125,6 +135,7 @@ type candidate struct {
 	tags       string
 	lines      sql.NullString
 	outline    []byte
+	departures sql.NullFloat64
 	distance   float64
 	score      float64
 }
@@ -140,7 +151,7 @@ func (p *Places) Nearby(ctx context.Context, cat *categories.Category, lat, lon 
 	radius := float64(cat.MaxDistanceMeters)
 	minLat, maxLat, minLon, maxLon := boundingBox(lat, lon, radius)
 	rows, err := p.db.QueryContext(ctx, `
-		SELECT p.osm_type, p.osm_id, p.name, p.lat, p.lon, p.importance, p.tags, p.lines, p.outline
+		SELECT p.osm_type, p.osm_id, p.name, p.lat, p.lon, p.importance, p.tags, p.lines, p.outline, p.departures
 		FROM places_rtree r JOIN places p ON p.id = r.id
 		WHERE r.min_lat <= ? AND r.max_lat >= ? AND r.min_lon <= ? AND r.max_lon >= ?
 		  AND r.min_cat = ?`,
@@ -153,7 +164,7 @@ func (p *Places) Nearby(ctx context.Context, cat *categories.Category, lat, lon 
 	var candidates []candidate
 	for rows.Next() {
 		var c candidate
-		if err := rows.Scan(&c.osmType, &c.osmID, &c.name, &c.lat, &c.lon, &c.importance, &c.tags, &c.lines, &c.outline); err != nil {
+		if err := rows.Scan(&c.osmType, &c.osmID, &c.name, &c.lat, &c.lon, &c.importance, &c.tags, &c.lines, &c.outline, &c.departures); err != nil {
 			return nil, err
 		}
 		c.distance = haversine(lat, lon, c.lat, c.lon)
@@ -185,7 +196,8 @@ func (p *Places) Nearby(ctx context.Context, cat *categories.Category, lat, lon 
 
 	places := make([]Place, 0, min(limit, len(candidates)))
 	// Index in places of the place returned for a name. The lines of all
-	// stops with that name are merged into it.
+	// stops with that name are merged into it. Departures already count all
+	// GTFS stops nearby, so the merged place keeps the highest number.
 	byName := make(map[string]int)
 	for _, c := range candidates {
 		collapse := cat.CollapseSameName && c.name.Valid
@@ -195,6 +207,9 @@ func (p *Places) Nearby(ctx context.Context, cat *categories.Category, lat, lon 
 				return nil, err
 			}
 			places[i].Lines = transit.Sort(append(places[i].Lines, lines...))
+			if d := places[i].DeparturesPerHour; c.departures.Valid && (d == nil || c.departures.Float64 > *d) {
+				places[i].DeparturesPerHour = &c.departures.Float64
+			}
 			continue
 		}
 		if len(places) == limit {
@@ -259,6 +274,9 @@ func (c candidate) toPlace() (Place, error) {
 		Wikidata:     optional("wikidata"),
 		Lines:        lines,
 		OSMURL:       "https://www.openstreetmap.org/" + id,
+	}
+	if c.departures.Valid {
+		place.DeparturesPerHour = &c.departures.Float64
 	}
 	if c.name.Valid {
 		place.Name = &c.name.String

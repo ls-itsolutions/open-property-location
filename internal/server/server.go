@@ -2,6 +2,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,7 +21,6 @@ const (
 	defaultLimit     = 5
 	maxLimit         = 20
 	maxAddressLength = 200
-	attribution      = "© OpenStreetMap contributors, ODbL"
 )
 
 type server struct {
@@ -36,6 +36,7 @@ func New(places *Places, cats *categories.Config, geocoder *geocode.Client) http
 	mux.HandleFunc("GET /v1/surroundings", s.surroundings)
 	mux.HandleFunc("GET /v1/categories", s.categories)
 	mux.HandleFunc("GET /health", s.health)
+	mux.HandleFunc("POST /mcp", s.mcpHTTP)
 	return mux
 }
 
@@ -57,23 +58,41 @@ type surroundingsResponse struct {
 }
 
 func (s *server) surroundings(w http.ResponseWriter, r *http.Request) {
-	req, err := s.parseRequest(r.URL.Query())
+	resp, err := s.lookup(r.Context(), r.URL.Query())
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeLookupError(w, err)
 		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// requestError is an error the client caused, with the HTTP status for it.
+type requestError struct {
+	status int
+	msg    string
+}
+
+func (e *requestError) Error() string { return e.msg }
+
+func badRequest(err error) error { return &requestError{http.StatusBadRequest, err.Error()} }
+
+// lookup answers a surroundings query given as API query parameters. Errors
+// the client caused are *requestError, all others are internal.
+func (s *server) lookup(ctx context.Context, q url.Values) (surroundingsResponse, error) {
+	req, err := s.parseRequest(q)
+	if err != nil {
+		return surroundingsResponse{}, badRequest(err)
 	}
 
 	loc := location{Lat: req.lat, Lon: req.lon}
 	if req.address != "" {
-		loc.Lat, loc.Lon, err = s.geocoder.Geocode(r.Context(), req.address)
+		loc.Lat, loc.Lon, err = s.geocoder.Geocode(ctx, req.address)
 		if errors.Is(err, geocode.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "address not found")
-			return
+			return surroundingsResponse{}, &requestError{http.StatusNotFound, "address not found"}
 		}
 		if err != nil {
 			slog.Error("geocoding failed", "err", err)
-			writeError(w, http.StatusBadGateway, "geocoding failed")
-			return
+			return surroundingsResponse{}, &requestError{http.StatusBadGateway, "geocoding failed"}
 		}
 	}
 
@@ -81,18 +100,26 @@ func (s *server) surroundings(w http.ResponseWriter, r *http.Request) {
 		Location:    loc,
 		Categories:  make([]categoryResult, 0, len(req.categories)),
 		DataVersion: s.places.DataVersion(),
-		Attribution: attribution,
+		Attribution: s.places.Attribution(),
 	}
 	for _, cat := range req.categories {
-		places, err := s.places.Nearby(r.Context(), cat, loc.Lat, loc.Lon, req.limit)
+		places, err := s.places.Nearby(ctx, cat, loc.Lat, loc.Lon, req.limit)
 		if err != nil {
-			slog.Error("query failed", "category", cat.ID, "err", err)
-			writeError(w, http.StatusInternalServerError, "internal error")
-			return
+			return surroundingsResponse{}, fmt.Errorf("query %s: %w", cat.ID, err)
 		}
 		resp.Categories = append(resp.Categories, categoryResult{ID: cat.ID, Places: places})
 	}
-	writeJSON(w, http.StatusOK, resp)
+	return resp, nil
+}
+
+func writeLookupError(w http.ResponseWriter, err error) {
+	var reqErr *requestError
+	if errors.As(err, &reqErr) {
+		writeError(w, reqErr.status, reqErr.msg)
+		return
+	}
+	slog.Error("lookup failed", "err", err)
+	writeError(w, http.StatusInternalServerError, "internal error")
 }
 
 type request struct {
@@ -178,14 +205,20 @@ type categoryInfo struct {
 }
 
 func (s *server) categories(w http.ResponseWriter, r *http.Request) {
-	resp := struct {
-		Categories []categoryInfo      `json:"categories"`
-		Presets    map[string][]string `json:"presets"`
-	}{Presets: s.cats.Presets}
+	writeJSON(w, http.StatusOK, s.categoryList())
+}
+
+type categoryList struct {
+	Categories []categoryInfo      `json:"categories"`
+	Presets    map[string][]string `json:"presets"`
+}
+
+func (s *server) categoryList() categoryList {
+	list := categoryList{Presets: s.cats.Presets}
 	for _, cat := range s.cats.Categories {
-		resp.Categories = append(resp.Categories, categoryInfo{ID: cat.ID, MaxDistanceMeters: cat.MaxDistanceMeters})
+		list.Categories = append(list.Categories, categoryInfo{ID: cat.ID, MaxDistanceMeters: cat.MaxDistanceMeters})
 	}
-	writeJSON(w, http.StatusOK, resp)
+	return list
 }
 
 func (s *server) health(w http.ResponseWriter, r *http.Request) {

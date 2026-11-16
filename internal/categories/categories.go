@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	"go.yaml.in/yaml/v3"
+
+	"github.com/ls-itsolutions/open-property-location/internal/transit"
 )
 
 //go:embed categories.yaml
@@ -27,7 +29,10 @@ type Category struct {
 	MaxDistanceMeters int
 	CollapseSameName  bool
 	DistanceToEdge    bool
-	matchers          []matcher
+	// DepartureModes is empty for categories without departures.
+	DepartureModes         []string
+	DeparturesWithinMeters int
+	matchers               []matcher
 }
 
 type matcher struct {
@@ -64,6 +69,10 @@ type fileFormat struct {
 		MaxDistanceMeters int      `yaml:"maxDistanceMeters"`
 		CollapseSameName  bool     `yaml:"collapseSameName"`
 		DistanceToEdge    bool     `yaml:"distanceToEdge"`
+		Departures        *struct {
+			Modes        []string `yaml:"modes"`
+			WithinMeters int      `yaml:"withinMeters"`
+		} `yaml:"departures"`
 	} `yaml:"categories"`
 	Presets map[string][]string `yaml:"presets"`
 }
@@ -105,6 +114,17 @@ func Parse(data []byte) (*Config, error) {
 			MaxDistanceMeters: c.MaxDistanceMeters,
 			CollapseSameName:  c.CollapseSameName,
 			DistanceToEdge:    c.DistanceToEdge,
+		}
+		if d := c.Departures; d != nil {
+			if len(d.Modes) == 0 || d.WithinMeters <= 0 {
+				return nil, fmt.Errorf("category %s: departures need modes and a positive withinMeters", c.ID)
+			}
+			for _, m := range d.Modes {
+				if !transit.IsMode(m) {
+					return nil, fmt.Errorf("category %s: unknown departure mode %q", c.ID, m)
+				}
+			}
+			cat.DepartureModes, cat.DeparturesWithinMeters = d.Modes, d.WithinMeters
 		}
 		for _, raw := range c.Match {
 			m, err := parseMatcher(raw)

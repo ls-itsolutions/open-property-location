@@ -14,6 +14,9 @@ import (
 // the lines of a stop are listed.
 var modes = []string{"train", "light_rail", "subway", "tram", "trolleybus", "bus", "ferry"}
 
+// IsMode reports whether mode is one of the route types lines are read for.
+func IsMode(mode string) bool { return slices.Contains(modes, mode) }
+
 // Line is a public transport line serving a stop.
 type Line struct {
 	Mode string `json:"mode"`
