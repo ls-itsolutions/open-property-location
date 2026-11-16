@@ -30,7 +30,8 @@ echo "==> building opl"
 (cd "$repo" && CGO_ENABLED=0 go build -o "$work/opl" ./cmd/opl)
 
 echo "==> downloading $region_path"
-curl --fail --location --retry 3 --silent --show-error \
+# --retry-all-errors: plain --retry gives up on refused connections.
+curl --fail --location --retry 5 --retry-delay 30 --retry-all-errors --silent --show-error \
   -o "$work/region.osm.pbf" "https://download.geofabrik.de/${region_path}-latest.osm.pbf"
 
 timestamp=$(osmium fileinfo -g header.option.osmosis_replication_timestamp "$work/region.osm.pbf")
